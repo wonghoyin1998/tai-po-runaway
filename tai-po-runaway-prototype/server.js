@@ -605,7 +605,10 @@ function serveFile(req, res) {
   const fileMap = {
     "/index.html": path.join(__dirname, "index.html"),
     "/app.js": path.join(__dirname, "public", "app.js"),
-    "/styles.css": path.join(__dirname, "public", "styles.css")
+    "/styles.css": path.join(__dirname, "public", "styles.css"),
+    "/manifest.json": path.join(__dirname, "public", "manifest.json"),
+    "/service-worker.js": path.join(__dirname, "public", "service-worker.js"),
+    "/icon.svg": path.join(__dirname, "public", "icon.svg")
   };
   const filePath = fileMap[urlPath];
   if (!filePath || !fs.existsSync(filePath)) {
@@ -614,7 +617,12 @@ function serveFile(req, res) {
     return;
   }
   const ext = path.extname(filePath);
-  const contentType = ext === ".html" ? "text/html; charset=utf-8" : ext === ".css" ? "text/css; charset=utf-8" : "application/javascript; charset=utf-8";
+  const contentType =
+    ext === ".html" ? "text/html; charset=utf-8" :
+    ext === ".css" ? "text/css; charset=utf-8" :
+    ext === ".json" ? "application/manifest+json; charset=utf-8" :
+    ext === ".svg" ? "image/svg+xml; charset=utf-8" :
+    "application/javascript; charset=utf-8";
   res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
   fs.createReadStream(filePath).pipe(res);
 }

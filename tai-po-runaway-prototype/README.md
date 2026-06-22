@@ -44,6 +44,25 @@ staff123
 STAFF_PASSWORD=你的密碼 npm run dev
 ```
 
+## 安裝到手機主畫面
+
+部署到 HTTPS 網址後，例如 Render 的 `onrender.com` 網址，可以當成 Web App 使用。
+
+iPhone / iPad：
+
+1. 用 Safari 開啟活動網址。
+2. 按分享按鈕。
+3. 選擇 `加入主畫面`。
+4. 名稱可用 `大埔逃走中`。
+
+Android：
+
+1. 用 Chrome 開啟活動網址。
+2. 按右上角選單。
+3. 選擇 `Install app` 或 `Add to Home screen`。
+
+提示聲需每部手機先按一次 `開提示聲`，瀏覽器才允許播放通知聲。
+
 ## Production build
 
 ```bash
