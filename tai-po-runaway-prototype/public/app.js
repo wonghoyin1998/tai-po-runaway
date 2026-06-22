@@ -874,6 +874,11 @@ function bindLogs() {
 
 connect();
 render();
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
 setInterval(() => {
   if (!state) return;
   if (isRoleEntryActive()) return;

@@ -1,0 +1,19 @@
+{
+  "name": "大埔逃走中",
+  "short_name": "逃走中",
+  "description": "大埔逃走中戶外活動即時同步 Web App",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09090d",
+  "theme_color": "#0a0a0d",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
