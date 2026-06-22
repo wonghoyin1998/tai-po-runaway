@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: tai-po-runaway
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: STAFF_PASSWORD
+        value: staff123
