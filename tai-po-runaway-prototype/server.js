@@ -138,12 +138,19 @@ function removeOneHunter() {
 
 function reviveParticipant(participant, method) {
   if (!participant || participant.status !== "dead") return false;
+  const stamp = nowIso();
   participant.status = participant.reviveCount > 0 ? "revived" : "alive";
   participant.reviveCount += 1;
   participant.caughtBy = "";
   participant.reviveRequested = false;
-  participant.lastUpdated = nowIso();
+  participant.lastUpdated = stamp;
   delete state.reviveTrials[participant.id];
+  state.gameState.publicMessage = {
+    title: "復活通知",
+    body: `${participant.name} 已透過${method}復活，重新加入遊戲。`,
+    level: "mission",
+    createdAt: stamp
+  };
   logEvent("revived", `${participant.name} 透過${method}復活`, { participantId: participant.id });
   return true;
 }
@@ -275,26 +282,28 @@ function applyAction(message, socket) {
       const hunter = hunterById(payload.hunterId);
       if (!participant || !hunter) throw new Error("找不到參加者或 Hunter");
       if (participant.status === "dead") throw new Error(`${participant.name} 已經死亡`);
-      const existing = state.catchReports.find((report) => report.participantId === participant.id && report.status === "pending");
-      if (existing) throw new Error(`${participant.name} 已有待處理捉人回報`);
+      participant.status = "dead";
+      participant.caughtBy = hunter.name;
+      participant.lastUpdated = stamp;
+      hunter.caughtCount += 1;
+      hunter.lastUpdated = stamp;
       state.catchReports.unshift({
         id: id("catch"),
         participantId: participant.id,
         participantName: participant.name,
         hunterId: hunter.id,
         hunterName: hunter.name,
-        status: "pending",
+        status: "confirmed",
         createdAt: stamp,
-        resolvedAt: ""
+        resolvedAt: stamp
       });
       state.gameState.publicMessage = {
-        title: "Hunter 回報",
-        body: `${hunter.name} 回報捉到 ${participant.name}，請等候工作人員確認。`,
+        title: "Hunter 捉人通知",
+        body: `${participant.name} 已被 ${hunter.name} 捉到。`,
         level: "danger",
         createdAt: stamp
       };
-      hunter.lastUpdated = stamp;
-      logEvent("catch_reported", `${hunter.name} 回報捉到 ${participant.name}`, { participantId: participant.id, hunterId: hunter.id });
+      logEvent("participant_caught", `${participant.name} 被 ${hunter.name} 捉到`, { participantId: participant.id, hunterId: hunter.id });
       break;
     }
 
@@ -354,6 +363,12 @@ function applyAction(message, socket) {
         participant.status = payload.status;
         participant.reviveRequested = false;
         participant.caughtBy = "";
+        state.gameState.publicMessage = {
+          title: "復活通知",
+          body: `${participant.name} 已復活，重新加入遊戲。`,
+          level: "mission",
+          createdAt: stamp
+        };
       } else if (payload.status === "dead") {
         participant.status = "dead";
       }

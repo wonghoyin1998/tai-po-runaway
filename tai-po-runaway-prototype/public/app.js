@@ -16,6 +16,9 @@ let staffTab = "dashboard";
 let entryName = "";
 let entryPassword = "";
 let stateReceivedAtMs = Date.now();
+let publishTitle = "";
+let publishBody = "";
+let publishLevel = "info";
 
 function loadRole() {
   const storedRole = localStorage.getItem("tp-role");
@@ -282,35 +285,31 @@ function staffPage() {
 }
 
 function dashboardTab() {
-  const pendingReports = state.catchReports.filter((report) => report.status === "pending");
+  const recentReports = state.catchReports.slice(0, 8);
   return `
     ${timePanel()}
     ${publicMessageHtml(true)}
     <section class="panel">
       <h2>發布訊息給所有參加者</h2>
-      <input id="publish-title" placeholder="標題，例如：前往圓洲仔公園" />
-      <textarea id="publish-body" placeholder="內容，例如：請所有參加者於 95-110 分鐘內前往圓洲仔公園。"></textarea>
+      <input id="publish-title" placeholder="標題，例如：前往圓洲仔公園" value="${escapeHtml(publishTitle)}" />
+      <textarea id="publish-body" placeholder="內容，例如：請所有參加者於 95-110 分鐘內前往圓洲仔公園。">${escapeHtml(publishBody)}</textarea>
       <select id="publish-level">
-        <option value="info">一般訊息</option>
-        <option value="mission">任務／指示</option>
-        <option value="danger">緊急／捉人通知</option>
+        <option value="info" ${publishLevel === "info" ? "selected" : ""}>一般訊息</option>
+        <option value="mission" ${publishLevel === "mission" ? "selected" : ""}>任務／指示</option>
+        <option value="danger" ${publishLevel === "danger" ? "selected" : ""}>緊急／捉人通知</option>
       </select>
       <button class="primary big" id="publish-message">立即發布</button>
     </section>
     <section class="panel">
-      <h2>Hunter 捉人回報</h2>
-      ${pendingReports.length ? pendingReports.map((report) => `
+      <h2>Hunter 捉人紀錄</h2>
+      ${recentReports.length ? recentReports.map((report) => `
         <div class="person-row pending">
           <div>
             <strong>${escapeHtml(report.participantName)}</strong>
-            <span>${escapeHtml(report.hunterName)} 回報捉到｜${new Date(report.createdAt).toLocaleTimeString("zh-HK")}</span>
-          </div>
-          <div class="mini-actions">
-            <button class="danger catch-resolve" data-id="${report.id}" data-confirmed="true">確認死亡</button>
-            <button class="catch-resolve" data-id="${report.id}" data-confirmed="false">取消</button>
+            <span>${escapeHtml(report.hunterName)} 捉到｜${new Date(report.createdAt).toLocaleTimeString("zh-HK")}｜已自動發布</span>
           </div>
         </div>
-      `).join("") : `<p class="muted">暫時沒有待處理捉人回報。</p>`}
+      `).join("") : `<p class="muted">暫時沒有捉人紀錄。</p>`}
     </section>
     <section class="panel">
       <h2>活動時間控制</h2>
@@ -551,17 +550,22 @@ function bindStaff() {
   });
 
   document.getElementById("publish-message")?.addEventListener("click", () => {
-    const title = document.getElementById("publish-title").value.trim() || "工作人員發布";
-    const body = document.getElementById("publish-body").value.trim();
-    const level = document.getElementById("publish-level").value;
+    publishTitle = document.getElementById("publish-title").value;
+    publishBody = document.getElementById("publish-body").value;
+    publishLevel = document.getElementById("publish-level").value;
+    const title = publishTitle.trim() || "工作人員發布";
+    const body = publishBody.trim();
     if (!body) return alert("請輸入發布內容。");
-    confirmSend("確認發布訊息給所有參加者？", "staff:publishMessage", { title, body, level });
+    send("staff:publishMessage", { title, body, level: publishLevel });
   });
-  document.querySelectorAll(".catch-resolve").forEach((button) => {
-    button.addEventListener("click", () => confirmSend(button.dataset.confirmed === "true" ? "確認此參加者死亡？" : "確認取消此捉人回報？", "staff:resolveCatch", {
-      reportId: button.dataset.id,
-      confirmed: button.dataset.confirmed === "true"
-    }));
+  document.getElementById("publish-title")?.addEventListener("input", (event) => {
+    publishTitle = event.target.value;
+  });
+  document.getElementById("publish-body")?.addEventListener("input", (event) => {
+    publishBody = event.target.value;
+  });
+  document.getElementById("publish-level")?.addEventListener("change", (event) => {
+    publishLevel = event.target.value;
   });
 
   document.querySelectorAll(".participant-action").forEach((button) => {
