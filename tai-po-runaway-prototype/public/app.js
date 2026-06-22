@@ -242,8 +242,8 @@ function timePanel() {
   return `
     <section class="panel urgent-panel">
       <div class="time-grid">
-        <div><span class="label">剩餘</span><strong>${formatCountdown()}</strong></div>
-        <div><span class="label">目前</span><strong>第 ${currentMinuteText()} 分鐘</strong></div>
+        <div><span class="label">剩餘</span><strong data-time-countdown>${formatCountdown()}</strong></div>
+        <div><span class="label">目前</span><strong data-time-minute>第 ${currentMinuteText()} 分鐘</strong></div>
       </div>
       <div class="mission-strip">
         ${missions.length ? missions.map((mission) => `<span class="badge mission">${escapeHtml(mission)}</span>`).join("") : `<span class="badge">未有開放任務</span>`}
@@ -251,6 +251,22 @@ function timePanel() {
       ${state.gameState.isPaused ? `<p class="warning-text">活動已暫停</p>` : ""}
     </section>
   `;
+}
+
+function updateVisibleTimeOnly() {
+  if (!state) return;
+  document.querySelectorAll("[data-time-countdown]").forEach((node) => {
+    node.textContent = formatCountdown();
+  });
+  document.querySelectorAll("[data-time-minute]").forEach((node) => {
+    node.textContent = `第 ${currentMinuteText()} 分鐘`;
+  });
+  document.querySelectorAll("[data-dead-countdown]").forEach((node) => {
+    node.textContent = formatCountdown();
+  });
+  document.querySelectorAll("[data-participant-minute]").forEach((node) => {
+    node.textContent = `目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}`;
+  });
 }
 
 function publicMessageHtml(compact = false) {
@@ -365,7 +381,7 @@ function participantPage() {
           <p>請立即前往復活區，等候工作人員完成復活。</p>
           <div class="dead-clock">
             <small>活動倒數</small>
-            <b>${formatCountdown()}</b>
+            <b data-dead-countdown>${formatCountdown()}</b>
           </div>
         </section>
       </main>
@@ -376,8 +392,8 @@ function participantPage() {
       ${header(`參加者：${participant.name}`, "請留意時間及工作人員發布", `<button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button><button id="logout">返回</button>`)}
       <section class="participant-clock ${tone}">
         <span class="label">活動倒數</span>
-        <strong>${formatCountdown()}</strong>
-        <p>目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}</p>
+        <strong data-time-countdown>${formatCountdown()}</strong>
+        <p data-participant-minute>目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}</p>
       </section>
       ${publicMessageHtml()}
       ${remainingPlayersHtml()}
@@ -897,6 +913,7 @@ if ("serviceWorker" in navigator) {
 }
 setInterval(() => {
   if (!state) return;
+  updateVisibleTimeOnly();
   if (isRoleEntryActive()) return;
   if (isStaffInteracting()) return;
   if (role?.role === "staff") return;
