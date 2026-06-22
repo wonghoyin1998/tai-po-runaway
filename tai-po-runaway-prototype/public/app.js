@@ -24,6 +24,7 @@ let pendingRender = false;
 let soundEnabled = false;
 let audioContext = null;
 let lastPublicMessageAt = "";
+let soundLastPlayedAt = 0;
 
 function isStaffFormActive() {
   const tagName = document.activeElement?.tagName;
@@ -62,27 +63,42 @@ function enableSound() {
     return;
   }
   audioContext = audioContext || new AudioContextClass();
-  audioContext.resume?.().then?.(() => playNotificationSound());
   soundEnabled = true;
-  toast = "提示聲已開啟，如聽到一聲即代表成功";
-  navigator.vibrate?.(120);
+  try {
+    audioContext.resume?.();
+    playNotificationSound(true);
+    window.setTimeout(() => playNotificationSound(true), 280);
+    toast = "提示聲已開啟。如沒有聲音，請檢查手機靜音模式及音量。";
+    navigator.vibrate?.([120, 60, 120]);
+  } catch (error) {
+    toast = "提示聲啟用失敗，請再按一次或檢查瀏覽器權限";
+  }
   render(true);
 }
 
-function playNotificationSound() {
+function playNotificationSound(force = false) {
   if (!soundEnabled || !audioContext) return;
-  const osc = audioContext.createOscillator();
-  const gain = audioContext.createGain();
-  osc.type = "square";
-  osc.frequency.setValueAtTime(988, audioContext.currentTime);
-  gain.gain.setValueAtTime(0.001, audioContext.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.35, audioContext.currentTime + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.35);
-  osc.connect(gain);
-  gain.connect(audioContext.destination);
-  osc.start();
-  osc.stop(audioContext.currentTime + 0.38);
-  navigator.vibrate?.(180);
+  const now = Date.now();
+  if (!force && now - soundLastPlayedAt < 800) return;
+  soundLastPlayedAt = now;
+  audioContext.resume?.();
+
+  const startAt = audioContext.currentTime + 0.01;
+  [880, 1175, 988].forEach((frequency, index) => {
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const toneStart = startAt + index * 0.18;
+    osc.type = "square";
+    osc.frequency.setValueAtTime(frequency, toneStart);
+    gain.gain.setValueAtTime(0.001, toneStart);
+    gain.gain.linearRampToValueAtTime(0.42, toneStart + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.001, toneStart + 0.15);
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.start(toneStart);
+    osc.stop(toneStart + 0.16);
+  });
+  navigator.vibrate?.([160, 70, 160]);
 }
 
 function loadRole() {
