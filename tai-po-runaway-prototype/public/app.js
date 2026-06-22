@@ -13,6 +13,9 @@ let toast = "";
 let role = loadRole();
 let roleMode = "participant";
 let staffTab = "dashboard";
+let entryName = "";
+let entryPassword = "";
+let stateReceivedAtMs = Date.now();
 
 function loadRole() {
   const storedRole = localStorage.getItem("tp-role");
@@ -56,7 +59,10 @@ function connect() {
   };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
-    if (message.type === "state") state = message.state;
+    if (message.type === "state") {
+      state = message.state;
+      stateReceivedAtMs = Date.now();
+    }
     if (message.type === "error") toast = message.message;
     if (message.type === "drawResult") toast = `一番賞結果：${message.detail}`;
     if (message.type === "joined") {
@@ -91,6 +97,26 @@ function confirmSend(message, action, payload = {}) {
   if (window.confirm(message)) send(action, payload);
 }
 
+function approximateElapsedMs() {
+  if (!state?.gameState?.isStarted) return 0;
+  if (state.gameState.isPaused) return state.gameState.accumulatedMs;
+  const serverNow = state.serverNowMs + (Date.now() - stateReceivedAtMs);
+  return Math.max(0, state.gameState.accumulatedMs + serverNow - state.gameState.lastStartedAtMs);
+}
+
+function formatCountdown() {
+  const totalSeconds = 120 * 60;
+  const elapsedSeconds = Math.floor(approximateElapsedMs() / 1000);
+  const remaining = Math.max(0, totalSeconds - elapsedSeconds);
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function currentMinuteText() {
+  return Math.floor(approximateElapsedMs() / 60000);
+}
+
 function header(title, subtitle = "", right = "") {
   return `
     <header class="topbar">
@@ -106,17 +132,28 @@ function header(title, subtitle = "", right = "") {
 
 function timePanel() {
   const missions = state.gameState.activeMissions;
-  const remain = Math.max(0, 120 - state.gameState.currentMinute);
   return `
     <section class="panel urgent-panel">
       <div class="time-grid">
-        <div><span class="label">剩餘</span><strong>${remain} 分鐘</strong></div>
-        <div><span class="label">目前</span><strong>第 ${state.gameState.currentMinute} 分鐘</strong></div>
+        <div><span class="label">剩餘</span><strong>${formatCountdown()}</strong></div>
+        <div><span class="label">目前</span><strong>第 ${currentMinuteText()} 分鐘</strong></div>
       </div>
       <div class="mission-strip">
         ${missions.length ? missions.map((mission) => `<span class="badge mission">${escapeHtml(mission)}</span>`).join("") : `<span class="badge">未有開放任務</span>`}
       </div>
       ${state.gameState.isPaused ? `<p class="warning-text">活動已暫停</p>` : ""}
+    </section>
+  `;
+}
+
+function publicMessageHtml(compact = false) {
+  const message = state.gameState.publicMessage || {};
+  return `
+    <section class="public-message ${message.level || "info"} ${compact ? "compact" : ""}">
+      <span class="label">工作人員發布</span>
+      <strong>${escapeHtml(message.title || "未有發布")}</strong>
+      <p>${escapeHtml(message.body || "請留意工作人員指示。")}</p>
+      ${message.createdAt ? `<small>${new Date(message.createdAt).toLocaleTimeString("zh-HK")}</small>` : ""}
     </section>
   `;
 }
@@ -157,8 +194,8 @@ function rolePage() {
       <section class="role-grid">${cards}</section>
       <section class="panel">
         ${roleMode === "staff"
-          ? `<label>工作人員密碼</label><input id="entry-password" type="password" placeholder="預設 staff123" />`
-          : `<label>${roleMode === "participant" ? "參加者姓名" : "Hunter 名稱／編號"}</label><input id="entry-name" placeholder="${roleMode === "participant" ? "例如：Samuel" : "例如：Hunter A"}" />`
+          ? `<label>工作人員密碼</label><input id="entry-password" type="password" placeholder="預設 staff123" value="${escapeHtml(entryPassword)}" autocomplete="current-password" />`
+          : `<label>${roleMode === "participant" ? "參加者姓名" : "Hunter 名稱／編號"}</label><input id="entry-name" placeholder="${roleMode === "participant" ? "例如：Samuel" : "例如：Hunter A"}" value="${escapeHtml(entryName)}" />`
         }
         <button id="enter-role" class="primary big">進入系統</button>
       </section>
@@ -175,29 +212,17 @@ function routePage() {
 function participantPage() {
   const participant = state.participants.find((item) => item.id === role.id) || state.participants.find((item) => item.name === role.name);
   if (!participant) return `<main>${header("正在同步身份", "如停留太久，請重新進入角色入口", `<button id="logout">返回</button>`)}</main>`;
-  const tone = participant.status === "dead" ? "dead" : participant.status === "revived" ? "revived" : "alive";
+  const tone = state.gameState.isPaused ? "paused" : "live";
   return `
     <main>
-      ${header(`參加者：${participant.name}`, "只顯示你的個人狀態", `<button id="logout">返回</button>`)}
-      ${timePanel()}
+      ${header(`參加者：${participant.name}`, "請留意時間及工作人員發布", `<button id="logout">返回</button>`)}
+      <section class="participant-clock ${tone}">
+        <span class="label">活動倒數</span>
+        <strong>${formatCountdown()}</strong>
+        <p>目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}</p>
+      </section>
+      ${publicMessageHtml()}
       ${participant.isGPS ? `<div class="gps-alert">你正被 GPS 定位中：${escapeHtml(participant.gpsLocation || "位置待更新")}</div>` : ""}
-      <section class="status-card">
-        <div><span class="label">你的狀態</span><strong class="status-text ${tone}">${labels.status[participant.status]}</strong></div>
-        <div class="chips"><span class="label">籌碼</span><strong>${participant.chips}</strong></div>
-      </section>
-      <section class="quick-grid">
-        <div class="mini-card"><span>二人影相</span><strong>${participant.photoCompleted ? "已完成" : "未完成"}</strong></div>
-        <div class="mini-card"><span>一番賞</span><strong>${participant.hasPlayedIchiban ? "已玩" : "未玩"}</strong></div>
-        <div class="mini-card"><span>GPS</span><strong>${participant.isGPS ? "定位中" : "沒有"}</strong></div>
-        <div class="mini-card"><span>復活次數</span><strong>${participant.reviveCount}</strong></div>
-      </section>
-      <section class="button-stack">
-        <button id="show-missions">查看目前任務</button>
-        <button class="danger" id="self-caught" data-id="${participant.id}">我被捉了</button>
-        <button class="blue" id="request-revive" data-id="${participant.id}" ${participant.status !== "dead" ? "disabled" : ""}>申請復活</button>
-        <button id="check-ichiban">查看一番賞狀態</button>
-        <button id="check-photo">查看二人影相狀態</button>
-      </section>
     </main>
   `;
 }
@@ -211,6 +236,7 @@ function hunterPage() {
     <main>
       ${header(hunter.name, `狀態：${labels.hunter[hunter.status]}`, `<button id="logout">返回</button>`)}
       ${timePanel()}
+      ${publicMessageHtml(true)}
       <section class="panel hunter-panel">
         <h2>GPS 目標</h2>
         ${gpsTargets.length ? gpsTargets.map((target) => `
@@ -223,7 +249,7 @@ function hunterPage() {
           ${alive.length ? alive.map((participant) => `
             <div class="person-row">
               <div><strong>${escapeHtml(participant.name)}</strong><span>${participant.isGPS ? `GPS：${escapeHtml(participant.gpsLocation)}` : `${participant.chips} 籌碼`}</span></div>
-              <button class="danger catch-btn" data-hunter="${hunter.id}" data-participant="${participant.id}" data-name="${escapeHtml(participant.name)}">確認捉到</button>
+              <button class="danger catch-btn" data-hunter="${hunter.id}" data-participant="${participant.id}" data-name="${escapeHtml(participant.name)}">回報捉到</button>
             </div>
           `).join("") : `<p class="muted">暫時沒有存活參加者。</p>`}
         </div>
@@ -256,8 +282,36 @@ function staffPage() {
 }
 
 function dashboardTab() {
+  const pendingReports = state.catchReports.filter((report) => report.status === "pending");
   return `
     ${timePanel()}
+    ${publicMessageHtml(true)}
+    <section class="panel">
+      <h2>發布訊息給所有參加者</h2>
+      <input id="publish-title" placeholder="標題，例如：前往圓洲仔公園" />
+      <textarea id="publish-body" placeholder="內容，例如：請所有參加者於 95-110 分鐘內前往圓洲仔公園。"></textarea>
+      <select id="publish-level">
+        <option value="info">一般訊息</option>
+        <option value="mission">任務／指示</option>
+        <option value="danger">緊急／捉人通知</option>
+      </select>
+      <button class="primary big" id="publish-message">立即發布</button>
+    </section>
+    <section class="panel">
+      <h2>Hunter 捉人回報</h2>
+      ${pendingReports.length ? pendingReports.map((report) => `
+        <div class="person-row pending">
+          <div>
+            <strong>${escapeHtml(report.participantName)}</strong>
+            <span>${escapeHtml(report.hunterName)} 回報捉到｜${new Date(report.createdAt).toLocaleTimeString("zh-HK")}</span>
+          </div>
+          <div class="mini-actions">
+            <button class="danger catch-resolve" data-id="${report.id}" data-confirmed="true">確認死亡</button>
+            <button class="catch-resolve" data-id="${report.id}" data-confirmed="false">取消</button>
+          </div>
+        </div>
+      `).join("") : `<p class="muted">暫時沒有待處理捉人回報。</p>`}
+    </section>
     <section class="panel">
       <h2>活動時間控制</h2>
       <div class="control-grid">
@@ -430,12 +484,20 @@ function bind() {
   });
   document.getElementById("enter-role")?.addEventListener("click", () => {
     if (roleMode === "staff") {
-      send("auth:staff", { password: document.getElementById("entry-password").value });
+      entryPassword = document.getElementById("entry-password").value;
+      send("auth:staff", { password: entryPassword });
       return;
     }
-    const name = document.getElementById("entry-name").value.trim();
+    entryName = document.getElementById("entry-name").value;
+    const name = entryName.trim();
     if (!name) return;
     send(roleMode === "participant" ? "participant:join" : "hunter:join", { name });
+  });
+  document.getElementById("entry-name")?.addEventListener("input", (event) => {
+    entryName = event.target.value;
+  });
+  document.getElementById("entry-password")?.addEventListener("input", (event) => {
+    entryPassword = event.target.value;
   });
   document.getElementById("logout")?.addEventListener("click", () => {
     localStorage.removeItem("tp-role");
@@ -452,22 +514,12 @@ function bind() {
 }
 
 function bindParticipant() {
-  const participant = role?.role === "participant"
-    ? state.participants.find((item) => item.id === role.id) || state.participants.find((item) => item.name === role.name)
-    : null;
-  document.getElementById("show-missions")?.addEventListener("click", () => {
-    const missions = state.gameState.activeMissions.length ? state.gameState.activeMissions.join("\n・") : "暫時未有開放任務。";
-    alert(`目前任務：\n・${missions}\n\n提示：籌碼可能有特別用途。`);
-  });
-  document.getElementById("self-caught")?.addEventListener("click", () => confirmSend("確認回報你已被捉？狀態會即時變成死亡。", "participant:selfCaught", { participantId: participant.id }));
-  document.getElementById("request-revive")?.addEventListener("click", () => confirmSend("確認申請復活？工作人員會在復活區處理。", "participant:requestRevive", { participantId: participant.id }));
-  document.getElementById("check-ichiban")?.addEventListener("click", () => alert(participant.hasPlayedIchiban ? "你已經玩過一番賞。" : "你尚未玩一番賞。每人限玩 1 次，需要 1 個籌碼。"));
-  document.getElementById("check-photo")?.addEventListener("click", () => alert(participant.photoCompleted ? "你已完成二人影相任務。" : "你尚未完成二人影相任務。"));
+  return;
 }
 
 function bindHunter() {
   document.querySelectorAll(".catch-btn").forEach((button) => {
-    button.addEventListener("click", () => confirmSend(`確認捉到 ${button.dataset.name}？`, "hunter:catch", {
+    button.addEventListener("click", () => confirmSend(`回報捉到 ${button.dataset.name}？此訊息會顯示給工作人員，並發布給所有參加者。`, "hunter:catch", {
       hunterId: button.dataset.hunter,
       participantId: button.dataset.participant
     }));
@@ -496,6 +548,20 @@ function bindStaff() {
       const active = button.dataset.active === "auto" ? null : button.dataset.active === "true";
       confirmSend("確認更新任務開關？", "mission:toggle", { missionId: button.dataset.id, active });
     });
+  });
+
+  document.getElementById("publish-message")?.addEventListener("click", () => {
+    const title = document.getElementById("publish-title").value.trim() || "工作人員發布";
+    const body = document.getElementById("publish-body").value.trim();
+    const level = document.getElementById("publish-level").value;
+    if (!body) return alert("請輸入發布內容。");
+    confirmSend("確認發布訊息給所有參加者？", "staff:publishMessage", { title, body, level });
+  });
+  document.querySelectorAll(".catch-resolve").forEach((button) => {
+    button.addEventListener("click", () => confirmSend(button.dataset.confirmed === "true" ? "確認此參加者死亡？" : "確認取消此捉人回報？", "staff:resolveCatch", {
+      reportId: button.dataset.id,
+      confirmed: button.dataset.confirmed === "true"
+    }));
   });
 
   document.querySelectorAll(".participant-action").forEach((button) => {
@@ -640,3 +706,6 @@ function bindLogs() {
 
 connect();
 render();
+setInterval(() => {
+  if (state && (role || state.gameState.isStarted)) render();
+}, 1000);

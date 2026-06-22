@@ -47,6 +47,12 @@ function initialState() {
       currentMinute: 0,
       activeMissions: [],
       hunterCount: 2,
+      publicMessage: {
+        title: "等待工作人員發布",
+        body: "請留意工作人員指示。",
+        level: "info",
+        createdAt
+      },
       lastUpdated: createdAt
     },
     missions: missionTemplates.map((mission) => ({
@@ -56,6 +62,7 @@ function initialState() {
       manualActive: null
     })),
     eventLogs: [],
+    catchReports: [],
     reviveTrials: {}
   };
 }
@@ -268,12 +275,75 @@ function applyAction(message, socket) {
       const hunter = hunterById(payload.hunterId);
       if (!participant || !hunter) throw new Error("找不到參加者或 Hunter");
       if (participant.status === "dead") throw new Error(`${participant.name} 已經死亡`);
-      participant.status = "dead";
-      participant.caughtBy = hunter.name;
-      participant.lastUpdated = stamp;
-      hunter.caughtCount += 1;
+      const existing = state.catchReports.find((report) => report.participantId === participant.id && report.status === "pending");
+      if (existing) throw new Error(`${participant.name} 已有待處理捉人回報`);
+      state.catchReports.unshift({
+        id: id("catch"),
+        participantId: participant.id,
+        participantName: participant.name,
+        hunterId: hunter.id,
+        hunterName: hunter.name,
+        status: "pending",
+        createdAt: stamp,
+        resolvedAt: ""
+      });
+      state.gameState.publicMessage = {
+        title: "Hunter 回報",
+        body: `${hunter.name} 回報捉到 ${participant.name}，請等候工作人員確認。`,
+        level: "danger",
+        createdAt: stamp
+      };
       hunter.lastUpdated = stamp;
-      logEvent("participant_caught", `${participant.name} 被 ${hunter.name} 捉到`, { participantId: participant.id, hunterId: hunter.id });
+      logEvent("catch_reported", `${hunter.name} 回報捉到 ${participant.name}`, { participantId: participant.id, hunterId: hunter.id });
+      break;
+    }
+
+    case "staff:resolveCatch": {
+      const report = state.catchReports.find((item) => item.id === payload.reportId);
+      if (!report) throw new Error("找不到捉人回報");
+      if (report.status !== "pending") throw new Error("此回報已處理");
+      const participant = participantById(report.participantId);
+      const hunter = hunterById(report.hunterId);
+      const confirmed = Boolean(payload.confirmed);
+      report.status = confirmed ? "confirmed" : "rejected";
+      report.resolvedAt = stamp;
+      if (confirmed) {
+        if (participant && participant.status !== "dead") {
+          participant.status = "dead";
+          participant.caughtBy = report.hunterName;
+          participant.lastUpdated = stamp;
+        }
+        if (hunter) {
+          hunter.caughtCount += 1;
+          hunter.lastUpdated = stamp;
+        }
+        state.gameState.publicMessage = {
+          title: "捉人確認",
+          body: `${report.participantName} 已被 ${report.hunterName} 捉到。`,
+          level: "danger",
+          createdAt: stamp
+        };
+        logEvent("participant_caught", `${report.participantName} 被 ${report.hunterName} 捉到，工作人員已確認`, { participantId: report.participantId, hunterId: report.hunterId });
+      } else {
+        state.gameState.publicMessage = {
+          title: "捉人回報取消",
+          body: `${report.participantName} 的捉人回報已取消。`,
+          level: "info",
+          createdAt: stamp
+        };
+        logEvent("catch_rejected", `${report.participantName} 的捉人回報被工作人員取消`, { participantId: report.participantId, hunterId: report.hunterId });
+      }
+      break;
+    }
+
+    case "staff:publishMessage": {
+      const title = String(payload.title || "工作人員發布").trim().slice(0, 80);
+      const body = String(payload.body || "").trim().slice(0, 500);
+      const level = ["info", "mission", "danger"].includes(payload.level) ? payload.level : "info";
+      if (!body) throw new Error("請輸入發布內容");
+      state.gameState.publicMessage = { title, body, level, createdAt: stamp };
+      state.gameState.lastUpdated = stamp;
+      logEvent("staff_message", `${title}：${body}`);
       break;
     }
 

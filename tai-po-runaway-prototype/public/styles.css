@@ -24,7 +24,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -46,7 +47,8 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 52px;
   border: 1px solid #3d4050;
@@ -55,6 +57,12 @@ select {
   background: #101119;
   color: #ffffff;
   font-size: 16px;
+}
+
+textarea {
+  min-height: 112px;
+  margin-top: 10px;
+  resize: vertical;
 }
 
 label {
@@ -199,7 +207,9 @@ main {
 
 .panel,
 .status-card,
-.gps-alert {
+.gps-alert,
+.public-message,
+.participant-clock {
   margin-bottom: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
@@ -268,6 +278,70 @@ main {
   color: #ffd7b0;
   font-size: 20px;
   font-weight: 1000;
+}
+
+.participant-clock {
+  text-align: center;
+  border-color: rgba(245, 200, 75, 0.48);
+  background: linear-gradient(180deg, rgba(245, 200, 75, 0.16), rgba(18, 19, 28, 0.96));
+}
+
+.participant-clock strong {
+  display: block;
+  font-size: clamp(60px, 20vw, 110px);
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.participant-clock p {
+  margin: 12px 0 0;
+  color: #f5c84b;
+  font-size: 19px;
+  font-weight: 900;
+}
+
+.participant-clock.paused {
+  border-color: rgba(255, 83, 109, 0.55);
+}
+
+.public-message {
+  border-color: rgba(95, 180, 255, 0.34);
+  background: #10182a;
+}
+
+.public-message strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 24px;
+}
+
+.public-message p {
+  margin-bottom: 8px;
+  font-size: 18px;
+  font-weight: 800;
+  white-space: pre-wrap;
+}
+
+.public-message small {
+  color: #aeb2c0;
+}
+
+.public-message.mission {
+  border-color: rgba(245, 200, 75, 0.55);
+  background: #2a2414;
+}
+
+.public-message.danger {
+  border-color: rgba(255, 83, 109, 0.7);
+  background: #2b1017;
+}
+
+.public-message.compact strong {
+  font-size: 20px;
+}
+
+.public-message.compact p {
+  font-size: 16px;
 }
 
 .status-card {
@@ -400,6 +474,10 @@ main {
 
 .person-row.revived {
   border-left: 5px solid #5fb4ff;
+}
+
+.person-row.pending {
+  border-left: 5px solid #f5c84b;
 }
 
 .target-row {
