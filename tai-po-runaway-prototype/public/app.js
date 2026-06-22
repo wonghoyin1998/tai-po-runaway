@@ -48,9 +48,6 @@ function renderAfterStaffInteraction() {
   window.setTimeout(() => {
     if (!isStaffInteracting() && pendingRender) render(true);
   }, 2200);
-  window.setTimeout(() => {
-    if (pendingRender) render(true);
-  }, 5200);
 }
 
 function enableSound() {
@@ -61,9 +58,10 @@ function enableSound() {
     return;
   }
   audioContext = audioContext || new AudioContextClass();
-  audioContext.resume?.();
+  audioContext.resume?.().then?.(() => playNotificationSound());
   soundEnabled = true;
-  toast = "提示聲已開啟";
+  toast = "提示聲已開啟，如聽到一聲即代表成功";
+  navigator.vibrate?.(120);
   render(true);
 }
 
@@ -71,15 +69,16 @@ function playNotificationSound() {
   if (!soundEnabled || !audioContext) return;
   const osc = audioContext.createOscillator();
   const gain = audioContext.createGain();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(880, audioContext.currentTime);
+  osc.type = "square";
+  osc.frequency.setValueAtTime(988, audioContext.currentTime);
   gain.gain.setValueAtTime(0.001, audioContext.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.22, audioContext.currentTime + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.22);
+  gain.gain.exponentialRampToValueAtTime(0.35, audioContext.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.35);
   osc.connect(gain);
   gain.connect(audioContext.destination);
   osc.start();
-  osc.stop(audioContext.currentTime + 0.24);
+  osc.stop(audioContext.currentTime + 0.38);
+  navigator.vibrate?.(180);
 }
 
 function loadRole() {
@@ -111,11 +110,12 @@ function connect() {
   socket.onopen = () => {
     connected = true;
     toast = "";
+    if (role?.role === "staff" && state) return;
     render();
   };
   socket.onclose = () => {
     connected = false;
-    render();
+    if (!(role?.role === "staff" && state)) render();
     setTimeout(connect, 1200);
   };
   socket.onerror = () => {
@@ -124,6 +124,7 @@ function connect() {
   };
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
+    const hadState = Boolean(state);
     if (message.type === "state") {
       state = message.state;
       stateReceivedAtMs = Date.now();
@@ -147,6 +148,10 @@ function connect() {
         localStorage.setItem("tp-name", "工作人員");
         role = { role: "staff", id: "staff", name: "工作人員" };
       }
+    }
+    if (role?.role === "staff" && message.type === "state" && hadState) {
+      pendingRender = true;
+      return;
     }
     if (isStaffInteracting()) {
       pendingRender = true;
@@ -313,6 +318,26 @@ function participantPage() {
   const participant = state.participants.find((item) => item.id === role.id) || state.participants.find((item) => item.name === role.name);
   if (!participant) return `<main>${header("正在同步身份", "如停留太久，請重新進入角色入口", `<button id="logout">返回</button>`)}</main>`;
   const tone = state.gameState.isPaused ? "paused" : "live";
+  const isDead = participant.status === "dead";
+  if (isDead) {
+    return `
+      <main class="dead-screen">
+        <div class="dead-actions">
+          <button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button>
+          <button id="logout">返回</button>
+        </div>
+        <section class="death-fullscreen">
+          <span>你已被捉</span>
+          <strong>死亡／等待復活</strong>
+          <p>請立即前往復活區，等候工作人員完成復活。</p>
+          <div class="dead-clock">
+            <small>活動倒數</small>
+            <b>${formatCountdown()}</b>
+          </div>
+        </section>
+      </main>
+    `;
+  }
   return `
     <main>
       ${header(`參加者：${participant.name}`, "請留意時間及工作人員發布", `<button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button><button id="logout">返回</button>`)}
@@ -370,7 +395,7 @@ function staffPage() {
   const tabs = [["dashboard", "總控"], ["ichiban", "一番賞"], ["gps", "GPS"], ["photo", "影相"], ["revive", "復活"], ["logs", "紀錄"]];
   return `
     <main>
-      ${header("工作人員 Dashboard", "總控及任務管理", `<button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button><button id="logout">返回</button>`)}
+      ${header("工作人員 Dashboard", "總控及任務管理", `<button id="staff-refresh">更新畫面</button><button id="sound-toggle">${soundEnabled ? "測試提示聲" : "開提示聲"}</button><button id="logout">返回</button>`)}
       <nav class="tabs">${tabs.map(([id, label]) => `<button class="tab-btn ${staffTab === id ? "active" : ""}" data-tab="${id}">${label}</button>`).join("")}</nav>
       ${staffTab === "dashboard" ? dashboardTab() : ""}
       ${staffTab === "ichiban" ? ichibanTab() : ""}
@@ -605,6 +630,11 @@ function bind() {
     render();
   });
   document.getElementById("sound-toggle")?.addEventListener("click", enableSound);
+  document.getElementById("staff-refresh")?.addEventListener("click", () => {
+    staffBusyUntilMs = 0;
+    pendingRender = false;
+    render(true);
+  });
 
   bindParticipant();
   bindHunter();
