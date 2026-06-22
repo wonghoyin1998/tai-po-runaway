@@ -19,6 +19,68 @@ let stateReceivedAtMs = Date.now();
 let publishTitle = "";
 let publishBody = "";
 let publishLevel = "info";
+let staffBusyUntilMs = 0;
+let pendingRender = false;
+let soundEnabled = false;
+let audioContext = null;
+let lastPublicMessageAt = "";
+
+function isStaffFormActive() {
+  const tagName = document.activeElement?.tagName;
+  return role?.role === "staff" && ["INPUT", "TEXTAREA", "SELECT"].includes(tagName);
+}
+
+function isStaffInteracting() {
+  return role?.role === "staff" && (Date.now() < staffBusyUntilMs || isStaffFormActive());
+}
+
+function markStaffBusy(ms = 5000) {
+  if (role?.role !== "staff") return;
+  staffBusyUntilMs = Math.max(staffBusyUntilMs, Date.now() + ms);
+}
+
+function renderAfterStaffInteraction() {
+  if (role?.role !== "staff") return;
+  pendingRender = true;
+  window.setTimeout(() => {
+    if (!isStaffInteracting() && pendingRender) render(true);
+  }, 900);
+  window.setTimeout(() => {
+    if (!isStaffInteracting() && pendingRender) render(true);
+  }, 2200);
+  window.setTimeout(() => {
+    if (pendingRender) render(true);
+  }, 5200);
+}
+
+function enableSound() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    toast = "此瀏覽器不支援提示聲";
+    render(true);
+    return;
+  }
+  audioContext = audioContext || new AudioContextClass();
+  audioContext.resume?.();
+  soundEnabled = true;
+  toast = "提示聲已開啟";
+  render(true);
+}
+
+function playNotificationSound() {
+  if (!soundEnabled || !audioContext) return;
+  const osc = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(880, audioContext.currentTime);
+  gain.gain.setValueAtTime(0.001, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.22, audioContext.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.22);
+  osc.connect(gain);
+  gain.connect(audioContext.destination);
+  osc.start();
+  osc.stop(audioContext.currentTime + 0.24);
+}
 
 function loadRole() {
   const storedRole = localStorage.getItem("tp-role");
@@ -65,6 +127,9 @@ function connect() {
     if (message.type === "state") {
       state = message.state;
       stateReceivedAtMs = Date.now();
+      const messageAt = state.gameState.publicMessage?.createdAt || "";
+      if (messageAt && lastPublicMessageAt && messageAt !== lastPublicMessageAt) playNotificationSound();
+      if (messageAt) lastPublicMessageAt = messageAt;
     }
     if (message.type === "error") toast = message.message;
     if (message.type === "drawResult") toast = `一番賞結果：${message.detail}`;
@@ -82,6 +147,11 @@ function connect() {
         localStorage.setItem("tp-name", "工作人員");
         role = { role: "staff", id: "staff", name: "工作人員" };
       }
+    }
+    if (isStaffInteracting()) {
+      pendingRender = true;
+      renderAfterStaffInteraction();
+      return;
     }
     render();
   };
@@ -161,11 +231,38 @@ function publicMessageHtml(compact = false) {
   `;
 }
 
+function remainingPlayersHtml() {
+  const remaining = state.participants.filter((item) => item.status !== "dead");
+  return `
+    <section class="panel remaining-panel">
+      <div class="section-heading">
+        <h2>尚餘玩家</h2>
+        <strong>${remaining.length} 人</strong>
+      </div>
+      ${remaining.length ? `
+        <div class="remaining-grid">
+          ${remaining.map((item) => `
+            <div class="remaining-player ${item.status}">
+              <strong>${escapeHtml(item.name)}</strong>
+              <span>${item.status === "revived" ? "已復活" : "存活"}</span>
+            </div>
+          `).join("")}
+        </div>
+      ` : `<p class="muted">暫時沒有尚餘玩家。</p>`}
+    </section>
+  `;
+}
+
 function participantOptions(list, selected = "", filter = () => true) {
   return `<option value="">選擇參加者</option>${list.filter(filter).map((p) => `<option value="${p.id}" ${p.id === selected ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}`;
 }
 
-function render() {
+function render(force = false) {
+  if (!force && isStaffInteracting()) {
+    pendingRender = true;
+    return;
+  }
+  pendingRender = false;
   root.innerHTML = `
     <div class="app-shell">
       <div class="connection ${connected ? "online" : "offline"}">${connected ? "即時同步中" : "連線中斷／重新連線中"}</div>
@@ -218,13 +315,14 @@ function participantPage() {
   const tone = state.gameState.isPaused ? "paused" : "live";
   return `
     <main>
-      ${header(`參加者：${participant.name}`, "請留意時間及工作人員發布", `<button id="logout">返回</button>`)}
+      ${header(`參加者：${participant.name}`, "請留意時間及工作人員發布", `<button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button><button id="logout">返回</button>`)}
       <section class="participant-clock ${tone}">
         <span class="label">活動倒數</span>
         <strong>${formatCountdown()}</strong>
         <p>目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}</p>
       </section>
       ${publicMessageHtml()}
+      ${remainingPlayersHtml()}
       ${participant.isGPS ? `<div class="gps-alert">你正被 GPS 定位中：${escapeHtml(participant.gpsLocation || "位置待更新")}</div>` : ""}
     </main>
   `;
@@ -237,7 +335,7 @@ function hunterPage() {
   const gpsTargets = state.participants.filter((participant) => participant.isGPS);
   return `
     <main>
-      ${header(hunter.name, `狀態：${labels.hunter[hunter.status]}`, `<button id="logout">返回</button>`)}
+      ${header(hunter.name, `狀態：${labels.hunter[hunter.status]}`, `<button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button><button id="logout">返回</button>`)}
       ${timePanel()}
       ${publicMessageHtml(true)}
       <section class="panel hunter-panel">
@@ -272,7 +370,7 @@ function staffPage() {
   const tabs = [["dashboard", "總控"], ["ichiban", "一番賞"], ["gps", "GPS"], ["photo", "影相"], ["revive", "復活"], ["logs", "紀錄"]];
   return `
     <main>
-      ${header("工作人員 Dashboard", "總控及任務管理", `<button id="logout">返回</button>`)}
+      ${header("工作人員 Dashboard", "總控及任務管理", `<button id="sound-toggle">${soundEnabled ? "提示聲已開" : "開提示聲"}</button><button id="logout">返回</button>`)}
       <nav class="tabs">${tabs.map(([id, label]) => `<button class="tab-btn ${staffTab === id ? "active" : ""}" data-tab="${id}">${label}</button>`).join("")}</nav>
       ${staffTab === "dashboard" ? dashboardTab() : ""}
       ${staffTab === "ichiban" ? ichibanTab() : ""}
@@ -506,6 +604,7 @@ function bind() {
     toast = "";
     render();
   });
+  document.getElementById("sound-toggle")?.addEventListener("click", enableSound);
 
   bindParticipant();
   bindHunter();
@@ -526,10 +625,16 @@ function bindHunter() {
 }
 
 function bindStaff() {
+  document.querySelector("main")?.addEventListener("focusin", () => markStaffBusy(8000));
+  document.querySelector("main")?.addEventListener("input", () => markStaffBusy(8000));
+  document.querySelector("main")?.addEventListener("change", () => markStaffBusy(8000));
+  document.querySelector("main")?.addEventListener("pointerdown", () => markStaffBusy(3000));
+
   document.querySelectorAll(".tab-btn").forEach((button) => {
     button.addEventListener("click", () => {
+      staffBusyUntilMs = 0;
       staffTab = button.dataset.tab;
-      render();
+      render(true);
     });
   });
 
@@ -557,6 +662,11 @@ function bindStaff() {
     const body = publishBody.trim();
     if (!body) return alert("請輸入發布內容。");
     send("staff:publishMessage", { title, body, level: publishLevel });
+    publishTitle = "";
+    publishBody = "";
+    publishLevel = "info";
+    staffBusyUntilMs = 0;
+    renderAfterStaffInteraction();
   });
   document.getElementById("publish-title")?.addEventListener("input", (event) => {
     publishTitle = event.target.value;
@@ -567,6 +677,9 @@ function bindStaff() {
   document.getElementById("publish-level")?.addEventListener("change", (event) => {
     publishLevel = event.target.value;
   });
+  document.getElementById("publish-title")?.addEventListener("blur", renderAfterStaffInteraction);
+  document.getElementById("publish-body")?.addEventListener("blur", renderAfterStaffInteraction);
+  document.getElementById("publish-level")?.addEventListener("blur", renderAfterStaffInteraction);
 
   document.querySelectorAll(".participant-action").forEach((button) => {
     button.addEventListener("click", () => confirmSend(`確認將 ${button.dataset.name} 設為${button.dataset.kind === "dead" ? "死亡" : "復活"}？`, "staff:participantStatus", {
@@ -711,5 +824,8 @@ function bindLogs() {
 connect();
 render();
 setInterval(() => {
-  if (state && (role || state.gameState.isStarted)) render();
+  if (!state) return;
+  if (isStaffInteracting()) return;
+  if (role?.role === "staff") return;
+  if (role || state.gameState.isStarted) render();
 }, 1000);

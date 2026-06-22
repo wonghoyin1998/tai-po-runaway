@@ -153,6 +153,13 @@ main {
   white-space: nowrap;
 }
 
+.topbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .eyebrow {
   margin-bottom: 8px;
   color: #ff405f;
@@ -342,6 +349,60 @@ main {
 
 .public-message.compact p {
   font-size: 16px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-heading h2 {
+  margin-bottom: 0;
+}
+
+.section-heading strong {
+  color: #f5c84b;
+  font-size: 24px;
+}
+
+.remaining-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.remaining-player {
+  border: 1px solid rgba(84, 216, 137, 0.35);
+  border-left: 5px solid #54d889;
+  border-radius: 8px;
+  padding: 12px;
+  background: #0f1714;
+}
+
+.remaining-player.revived {
+  border-color: rgba(95, 180, 255, 0.42);
+  border-left-color: #5fb4ff;
+  background: #10182a;
+}
+
+.remaining-player strong,
+.remaining-player span {
+  display: block;
+}
+
+.remaining-player strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.remaining-player span {
+  margin-top: 4px;
+  color: #aeb2c0;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .status-card {
