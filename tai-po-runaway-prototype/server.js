@@ -460,14 +460,10 @@ function applyAction(message, socket) {
       const participant = participantById(payload.participantId);
       if (!participant) throw new Error("找不到參加者");
       if (participant.hasPlayedIchiban) throw new Error(`${participant.name} 已玩過一番賞`);
-      if (participant.chips < 1) throw new Error(`${participant.name} 籌碼不足`);
-      participant.chips -= 1;
-      const outcomes = ["chip", "hunterDown", "gps"];
-      const result = outcomes[Math.floor(Math.random() * outcomes.length)];
+      const result = ["chip", "hunterDown", "gps"].includes(payload.result) ? payload.result : "chip";
       let detail = "";
       if (result === "chip") {
-        participant.chips += 1;
-        detail = "抽 1 籌碼";
+        detail = "抽 1 籌碼（實體籌碼現場處理）";
       }
       if (result === "hunterDown") {
         const removed = removeOneHunter();
@@ -482,6 +478,12 @@ function applyAction(message, socket) {
       }
       participant.hasPlayedIchiban = true;
       participant.lastUpdated = stamp;
+      state.gameState.publicMessage = {
+        title: "一番賞結果",
+        body: `${participant.name} 的一番賞結果：${detail}`,
+        level: "mission",
+        createdAt: stamp
+      };
       logEvent("ichiban_result", `${participant.name} 一番賞結果：${detail}`, { participantId: participant.id });
       send(socket, { type: "drawResult", result, detail });
       break;
@@ -498,11 +500,9 @@ function applyAction(message, socket) {
       const participant = participantById(payload.participantId);
       if (!participant) throw new Error("找不到參加者");
       if (participant.status !== "dead") throw new Error("只可為死亡中的參加者開啟復活挑戰");
-      if (participant.chips < 1) throw new Error(`${participant.name} 籌碼不足`);
-      participant.chips -= 1;
       participant.lastUpdated = stamp;
       state.reviveTrials[participant.id] = { participantId: participant.id, method: "flip", attempts: [], isOpen: true, createdAt: stamp };
-      logEvent("revive_flip_start", `${participant.name} 使用 1 籌碼開始 Flip 洗頭水樽復活`, { participantId: participant.id });
+      logEvent("revive_flip_start", `${participant.name} 以現場實體籌碼開始 Flip 洗頭水樽復活`, { participantId: participant.id });
       break;
     }
 

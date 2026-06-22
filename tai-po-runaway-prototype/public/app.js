@@ -30,6 +30,10 @@ function isStaffFormActive() {
   return role?.role === "staff" && ["INPUT", "TEXTAREA", "SELECT"].includes(tagName);
 }
 
+function isRoleEntryActive() {
+  return !role && ["entry-name", "entry-password"].includes(document.activeElement?.id);
+}
+
 function isStaffInteracting() {
   return role?.role === "staff" && (Date.now() < staffBusyUntilMs || isStaffFormActive());
 }
@@ -110,12 +114,13 @@ function connect() {
   socket.onopen = () => {
     connected = true;
     toast = "";
+    if (!role && state) return;
     if (role?.role === "staff" && state) return;
     render();
   };
   socket.onclose = () => {
     connected = false;
-    if (!(role?.role === "staff" && state)) render();
+    if (!((role?.role === "staff" || !role) && state)) render();
     setTimeout(connect, 1200);
   };
   socket.onerror = () => {
@@ -148,6 +153,14 @@ function connect() {
         localStorage.setItem("tp-name", "工作人員");
         role = { role: "staff", id: "staff", name: "工作人員" };
       }
+    }
+    if (!role && message.type === "state" && hadState) {
+      pendingRender = true;
+      return;
+    }
+    if (isRoleEntryActive()) {
+      pendingRender = true;
+      return;
     }
     if (role?.role === "staff" && message.type === "state" && hadState) {
       pendingRender = true;
@@ -263,6 +276,10 @@ function participantOptions(list, selected = "", filter = () => true) {
 }
 
 function render(force = false) {
+  if (!force && isRoleEntryActive()) {
+    pendingRender = true;
+    return;
+  }
   if (!force && isStaffInteracting()) {
     pendingRender = true;
     return;
@@ -284,7 +301,7 @@ function loadingPage() {
 
 function rolePage() {
   const cards = [
-    ["participant", "參加者", "查看自己狀態、籌碼、任務與復活"],
+    ["participant", "參加者", "查看倒數、通知與尚餘玩家"],
     ["hunter", "Hunter", "查看存活名單、GPS 目標並確認捉人"],
     ["staff", "工作人員／總控", "管理全部狀態、任務與紀錄"]
   ].map(([value, label, desc]) => `
@@ -374,7 +391,7 @@ function hunterPage() {
         <div class="list">
           ${alive.length ? alive.map((participant) => `
             <div class="person-row">
-              <div><strong>${escapeHtml(participant.name)}</strong><span>${participant.isGPS ? `GPS：${escapeHtml(participant.gpsLocation)}` : `${participant.chips} 籌碼`}</span></div>
+              <div><strong>${escapeHtml(participant.name)}</strong><span>${participant.isGPS ? `GPS：${escapeHtml(participant.gpsLocation)}` : labels.status[participant.status]}</span></div>
               <button class="danger catch-btn" data-hunter="${hunter.id}" data-participant="${participant.id}" data-name="${escapeHtml(participant.name)}">回報捉到</button>
             </div>
           `).join("") : `<p class="muted">暫時沒有存活參加者。</p>`}
@@ -493,13 +510,11 @@ function participantAdminRow(participant) {
     <div class="person-row ${participant.status}">
       <div>
         <strong>${escapeHtml(participant.name)}</strong>
-        <span>${labels.status[participant.status]}｜${participant.chips} 籌碼｜影相 ${participant.photoCompleted ? "完成" : "未"}｜一番賞 ${participant.hasPlayedIchiban ? "已玩" : "未玩"}｜GPS ${participant.isGPS ? "ON" : "OFF"}</span>
+        <span>${labels.status[participant.status]}｜影相 ${participant.photoCompleted ? "完成" : "未"}｜一番賞 ${participant.hasPlayedIchiban ? "已記錄" : "未記錄"}｜GPS ${participant.isGPS ? "ON" : "OFF"}</span>
       </div>
       <div class="mini-actions">
         <button class="danger participant-action" data-kind="dead" data-id="${participant.id}" data-name="${escapeHtml(participant.name)}">死亡</button>
         <button class="blue participant-action" data-kind="revived" data-id="${participant.id}" data-name="${escapeHtml(participant.name)}">復活</button>
-        <button class="participant-chip" data-delta="1" data-id="${participant.id}" data-name="${escapeHtml(participant.name)}">+籌</button>
-        <button class="participant-chip" data-delta="-1" data-id="${participant.id}" data-name="${escapeHtml(participant.name)}">-籌</button>
         <button class="participant-photo" data-id="${participant.id}" data-name="${escapeHtml(participant.name)}">影相</button>
         <button class="participant-gps" data-id="${participant.id}" data-isgps="${participant.isGPS}" data-name="${escapeHtml(participant.name)}">GPS</button>
       </div>
@@ -510,13 +525,20 @@ function participantAdminRow(participant) {
 function ichibanTab() {
   return `
     <section class="panel">
-      <h2>一番賞管理</h2>
+      <h2>一番賞紀錄／發布</h2>
+      <p class="muted">一番賞現場用實體抽籤及實體籌碼處理；App 只負責記錄結果及同步通知。</p>
       <select id="ichiban-participant">${participantOptions(state.participants)}</select>
-      <div id="ichiban-info" class="checklist"><p>選擇參加者後會顯示籌碼及是否已玩。</p></div>
-      <label>如抽中 +1 GPS，指定目標</label>
+      <div id="ichiban-info" class="checklist"><p>選擇參加者後會顯示是否已記錄一番賞。</p></div>
+      <label>現場抽籤結果</label>
+      <select id="ichiban-result">
+        <option value="chip">抽 1 籌碼</option>
+        <option value="hunterDown">減 1 Hunter</option>
+        <option value="gps">+1 GPS</option>
+      </select>
+      <label>如結果是 +1 GPS，指定目標</label>
       <select id="ichiban-gps-target">${participantOptions(state.participants)}</select>
       <select id="ichiban-gps-location">${gpsLocations.map((location) => `<option>${escapeHtml(location)}</option>`).join("")}</select>
-      <button class="primary big" id="ichiban-draw">抽籤</button>
+      <button class="primary big" id="ichiban-record">記錄並發布結果</button>
     </section>
   `;
 }
@@ -565,10 +587,10 @@ function reviveTab() {
     <section class="panel">
       <h2>復活管理</h2>
       <select id="revive-participant">${participantOptions(dead)}</select>
-      <div id="revive-info" class="checklist"><p>選擇死亡參加者後會顯示籌碼及挑戰紀錄。</p></div>
+      <div id="revive-info" class="checklist"><p>選擇死亡參加者後會顯示復活資料及挑戰紀錄。</p></div>
       <div class="button-stack">
         <button class="blue" id="revive-pat37">拍三七成功復活</button>
-        <button id="revive-flip-start">使用 1 籌碼開始 Flip</button>
+        <button id="revive-flip-start">現場籌碼開始 Flip</button>
       </div>
       <div id="revive-trial"></div>
       ${dead.length ? "" : `<p class="muted">暫時沒有死亡參加者。</p>`}
@@ -620,6 +642,12 @@ function bind() {
   });
   document.getElementById("entry-password")?.addEventListener("input", (event) => {
     entryPassword = event.target.value;
+  });
+  document.getElementById("entry-name")?.addEventListener("blur", () => {
+    if (pendingRender) render(true);
+  });
+  document.getElementById("entry-password")?.addEventListener("blur", () => {
+    if (pendingRender) render(true);
   });
   document.getElementById("logout")?.addEventListener("click", () => {
     localStorage.removeItem("tp-role");
@@ -717,12 +745,6 @@ function bindStaff() {
       status: button.dataset.kind
     }));
   });
-  document.querySelectorAll(".participant-chip").forEach((button) => {
-    button.addEventListener("click", () => confirmSend(`${button.dataset.name} 籌碼 ${Number(button.dataset.delta) > 0 ? "+1" : "-1"}？`, "staff:chip", {
-      participantId: button.dataset.id,
-      delta: Number(button.dataset.delta)
-    }));
-  });
   document.querySelectorAll(".participant-photo").forEach((button) => {
     button.addEventListener("click", () => confirmSend(`標記 ${button.dataset.name} 二人影相完成？`, "staff:photo", { participantId: button.dataset.id, completed: true }));
   });
@@ -754,16 +776,16 @@ function bindIchiban() {
   function updateInfo() {
     const participant = state.participants.find((p) => p.id === select?.value);
     if (!participant || !info) return;
-    info.innerHTML = `<p>已玩過：<strong>${participant.hasPlayedIchiban ? "是" : "否"}</strong></p><p>籌碼：<strong>${participant.chips}</strong></p>`;
+    info.innerHTML = `<p>已記錄一番賞：<strong>${participant.hasPlayedIchiban ? "是" : "否"}</strong></p>`;
   }
   select?.addEventListener("change", updateInfo);
-  document.getElementById("ichiban-draw")?.addEventListener("click", () => {
+  document.getElementById("ichiban-record")?.addEventListener("click", () => {
     const participant = state.participants.find((p) => p.id === select.value);
     if (!participant) return alert("請先選擇參加者。");
-    if (participant.hasPlayedIchiban) return alert("此參加者已玩過一番賞。");
-    if (participant.chips < 1) return alert("此參加者籌碼不足。");
-    confirmSend(`確認扣除 ${participant.name} 1 個籌碼並抽一番賞？`, "ichiban:draw", {
+    if (participant.hasPlayedIchiban) return alert("此參加者已記錄過一番賞。");
+    confirmSend(`確認記錄 ${participant.name} 的現場一番賞結果？`, "ichiban:draw", {
       participantId: participant.id,
+      result: document.getElementById("ichiban-result").value,
       gpsTargetId: document.getElementById("ichiban-gps-target").value,
       gpsLocation: document.getElementById("ichiban-gps-location").value
     });
@@ -796,7 +818,7 @@ function bindRevive() {
     const participant = state.participants.find((p) => p.id === select?.value);
     const trial = state.reviveTrials[select?.value];
     if (participant && info) {
-      info.innerHTML = `<p>參加者：<strong>${escapeHtml(participant.name)}</strong></p><p>籌碼：<strong>${participant.chips}</strong></p><p>申請復活：<strong>${participant.reviveRequested ? "是" : "未申請／已處理"}</strong></p>`;
+      info.innerHTML = `<p>參加者：<strong>${escapeHtml(participant.name)}</strong></p><p>籌碼以現場實體紀錄為準</p><p>申請復活：<strong>${participant.reviveRequested ? "是" : "未申請／已處理"}</strong></p>`;
     }
     if (trial && trialBox) {
       trialBox.innerHTML = `
@@ -827,8 +849,7 @@ function bindRevive() {
   document.getElementById("revive-flip-start")?.addEventListener("click", () => {
     const participant = state.participants.find((p) => p.id === select.value);
     if (!participant) return alert("請先選擇死亡參加者。");
-    if (participant.chips < 1) return alert("此參加者籌碼不足。");
-    confirmSend(`確認扣除 ${participant.name} 1 個籌碼，開始 3 次 Flip 挑戰？`, "revive:flipStart", { participantId: participant.id });
+    confirmSend(`確認 ${participant.name} 已以現場實體籌碼開始 3 次 Flip 挑戰？`, "revive:flipStart", { participantId: participant.id });
   });
 }
 
@@ -855,6 +876,7 @@ connect();
 render();
 setInterval(() => {
   if (!state) return;
+  if (isRoleEntryActive()) return;
   if (isStaffInteracting()) return;
   if (role?.role === "staff") return;
   if (role || state.gameState.isStarted) render();
