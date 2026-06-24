@@ -25,6 +25,11 @@ let soundEnabled = false;
 let audioContext = null;
 let lastPublicMessageAt = "";
 let soundLastPlayedAt = 0;
+let gpsWatchId = null;
+let gpsWakeLock = null;
+let gpsLocalStatus = "未開始定位";
+let gpsLastSentAt = 0;
+let gpsLastPosition = null;
 
 function isStaffFormActive() {
   const tagName = document.activeElement?.tagName;
@@ -101,6 +106,136 @@ function playNotificationSound(force = false) {
   navigator.vibrate?.([160, 70, 160]);
 }
 
+function stopLiveGps(status = "定位已停止") {
+  if (gpsWatchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(gpsWatchId);
+  gpsWatchId = null;
+  gpsLastSentAt = 0;
+  gpsLastPosition = null;
+  gpsLocalStatus = status;
+  if (gpsWakeLock) {
+    gpsWakeLock.release?.().catch(() => {});
+    gpsWakeLock = null;
+  }
+}
+
+async function requestGpsWakeLock() {
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+  try {
+    gpsWakeLock = await navigator.wakeLock.request("screen");
+    gpsWakeLock.addEventListener?.("release", () => {
+      gpsWakeLock = null;
+    });
+  } catch (error) {
+    gpsWakeLock = null;
+  }
+}
+
+function activeParticipant() {
+  if (role?.role !== "participant" || !state) return null;
+  return state.participants.find((item) => item.id === role.id) || state.participants.find((item) => item.name === role.name);
+}
+
+function reconcileLiveGps() {
+  const participant = activeParticipant();
+  const shouldTrack = Boolean(participant?.isGPS && participant.gpsMode === "live" && participant.status !== "dead");
+  if (!shouldTrack && gpsWatchId !== null) stopLiveGps(participant?.isGPS ? "目前不需真實定位" : "工作人員已取消 GPS");
+}
+
+function startLiveGps() {
+  const participant = activeParticipant();
+  if (!participant?.isGPS || participant.gpsMode !== "live") {
+    toast = "目前未被指定使用真實 GPS";
+    render(true);
+    return;
+  }
+  if (!navigator.geolocation) {
+    gpsLocalStatus = "此手機／瀏覽器不支援 GPS 定位";
+    render(true);
+    return;
+  }
+  if (gpsWatchId !== null) {
+    gpsLocalStatus = "GPS 定位運作中";
+    render(true);
+    return;
+  }
+
+  gpsLocalStatus = "正在取得位置，請允許定位權限…";
+  requestGpsWakeLock();
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      gpsLocalStatus = `定位運作中｜手機誤差約 ±${Math.round(position.coords.accuracy || 0)} 米`;
+      gpsLastPosition = position;
+      const now = Date.now();
+      if (now - gpsLastSentAt >= 10000) {
+        gpsLastSentAt = now;
+        send("participant:gpsUpdate", {
+          participantId: participant.id,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
+      }
+      render(true);
+    },
+    (error) => {
+      const messages = {
+        1: "定位權限被拒絕，請在手機設定允許位置權限",
+        2: "暫時無法取得位置，請移到較開揚位置",
+        3: "取得位置逾時，系統會繼續重試"
+      };
+      gpsLocalStatus = messages[error.code] || "GPS 定位失敗";
+      if (error.code === 1) stopLiveGps(gpsLocalStatus);
+      render(true);
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+  render(true);
+}
+
+function gpsAgeSeconds(target) {
+  if (!target.gpsUpdatedAt) return null;
+  return Math.max(0, Math.floor((Date.now() - Date.parse(target.gpsUpdatedAt)) / 1000));
+}
+
+function gpsFreshness(target) {
+  if (target.gpsMode !== "live") return { label: "手動位置", className: "manual" };
+  const age = gpsAgeSeconds(target);
+  if (age === null) return { label: "等待參加者開啟定位", className: "waiting" };
+  if (age > 60) return { label: `${age} 秒前｜位置已過時`, className: "stale" };
+  if (age > 25) return { label: `${age} 秒前｜更新較慢`, className: "waiting" };
+  return { label: `${age} 秒前更新`, className: "active" };
+}
+
+function gpsMapUrl(target) {
+  if (!Number.isFinite(target.gpsLatitude) || !Number.isFinite(target.gpsLongitude)) return "";
+  const lat = target.gpsLatitude.toFixed(6);
+  const lng = target.gpsLongitude.toFixed(6);
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+}
+
+function gpsTargetHtml(target, controls = "") {
+  const freshness = gpsFreshness(target);
+  const mapUrl = gpsMapUrl(target);
+  const locationText = target.gpsMode === "live"
+    ? mapUrl
+      ? `約略位置｜誤差約 ±${Math.round(target.gpsAccuracy || 45)} 米`
+      : "等待參加者按「開始 GPS 定位」"
+    : target.gpsLocation || "位置待更新";
+  return `
+    <div class="gps-target-card ${freshness.className}">
+      <div>
+        <strong>${escapeHtml(target.name)}</strong>
+        <span>${escapeHtml(locationText)}</span>
+        <small ${target.gpsUpdatedAt ? `data-gps-updated-at="${escapeHtml(target.gpsUpdatedAt)}"` : ""}>${escapeHtml(freshness.label)}</small>
+      </div>
+      <div class="gps-actions">
+        ${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener">開啟約略地圖</a>` : ""}
+        ${controls}
+      </div>
+    </div>
+  `;
+}
+
 function loadRole() {
   const storedRole = localStorage.getItem("tp-role");
   if (!storedRole) return null;
@@ -130,6 +265,18 @@ function connect() {
   socket.onopen = () => {
     connected = true;
     toast = "";
+    if (gpsWatchId !== null && gpsLastPosition) {
+      gpsLastSentAt = 0;
+      const participant = activeParticipant();
+      if (participant) {
+        send("participant:gpsUpdate", {
+          participantId: participant.id,
+          latitude: gpsLastPosition.coords.latitude,
+          longitude: gpsLastPosition.coords.longitude,
+          accuracy: gpsLastPosition.coords.accuracy
+        });
+      }
+    }
     if (!role && state) return;
     if (role?.role === "staff" && state) return;
     render();
@@ -147,8 +294,15 @@ function connect() {
     const message = JSON.parse(event.data);
     const hadState = Boolean(state);
     if (message.type === "state") {
+      const previousParticipant = activeParticipant();
       state = message.state;
       stateReceivedAtMs = Date.now();
+      reconcileLiveGps();
+      const currentParticipant = activeParticipant();
+      if (currentParticipant?.isGPS && !previousParticipant?.isGPS) {
+        toast = currentParticipant.gpsMode === "live" ? "你已被指定真實 GPS，請按「開始 GPS 定位」" : "你已被 GPS 標記";
+        playNotificationSound();
+      }
       const messageAt = state.gameState.publicMessage?.createdAt || "";
       if (messageAt && lastPublicMessageAt && messageAt !== lastPublicMessageAt) playNotificationSound();
       if (messageAt) lastPublicMessageAt = messageAt;
@@ -180,6 +334,7 @@ function connect() {
     }
     if (role?.role === "staff" && message.type === "state" && hadState) {
       pendingRender = true;
+      if (staffTab === "gps" && !isStaffInteracting()) render(true);
       return;
     }
     if (isStaffInteracting()) {
@@ -266,6 +421,15 @@ function updateVisibleTimeOnly() {
   });
   document.querySelectorAll("[data-participant-minute]").forEach((node) => {
     node.textContent = `目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}`;
+  });
+  document.querySelectorAll("[data-gps-updated-at]").forEach((node) => {
+    const updatedAt = node.dataset.gpsUpdatedAt;
+    if (!updatedAt) return;
+    const age = Math.max(0, Math.floor((Date.now() - Date.parse(updatedAt)) / 1000));
+    node.textContent = age > 60 ? `${age} 秒前｜位置已過時` : age > 25 ? `${age} 秒前｜更新較慢` : `${age} 秒前更新`;
+    const card = node.closest(".gps-target-card");
+    card?.classList.toggle("stale", age > 60);
+    card?.classList.toggle("active", age <= 25);
   });
 }
 
@@ -397,8 +561,24 @@ function participantPage() {
       </section>
       ${publicMessageHtml()}
       ${remainingPlayersHtml()}
-      ${participant.isGPS ? `<div class="gps-alert">你正被 GPS 定位中：${escapeHtml(participant.gpsLocation || "位置待更新")}</div>` : ""}
+      ${participant.isGPS ? participantGpsPanel(participant) : ""}
     </main>
+  `;
+}
+
+function participantGpsPanel(participant) {
+  if (participant.gpsMode !== "live") {
+    return `<div class="gps-alert">你正被 GPS 定位中：${escapeHtml(participant.gpsLocation || "位置待更新")}</div>`;
+  }
+  const active = gpsWatchId !== null;
+  return `
+    <section class="gps-live-panel ${active ? "active" : "waiting"}">
+      <span class="gps-kicker">你正被 GPS 定位中</span>
+      <strong>${active ? "真實 GPS 已開啟" : "需要開啟真實 GPS"}</strong>
+      <p>${escapeHtml(gpsLocalStatus)}</p>
+      <p class="gps-instruction">請保持此 Web App 在畫面上及不要鎖屏。系統只會向 Hunter 顯示模糊化後的約略位置。</p>
+      <button class="${active ? "" : "primary"} big" id="${active ? "gps-stop-local" : "gps-start-live"}">${active ? "暫停本機定位" : "開始 GPS 定位"}</button>
+    </section>
   `;
 }
 
@@ -414,16 +594,14 @@ function hunterPage() {
       ${publicMessageHtml(true)}
       <section class="panel hunter-panel">
         <h2>GPS 目標</h2>
-        ${gpsTargets.length ? gpsTargets.map((target) => `
-          <div class="target-row"><strong>${escapeHtml(target.name)}</strong><span>${escapeHtml(target.gpsLocation || "位置待更新")}</span></div>
-        `).join("") : `<p class="muted">暫時沒有 GPS 目標。</p>`}
+        ${gpsTargets.length ? gpsTargets.map((target) => gpsTargetHtml(target)).join("") : `<p class="muted">暫時沒有 GPS 目標。</p>`}
       </section>
       <section class="panel">
         <h2>可追捕參加者</h2>
         <div class="list">
           ${alive.length ? alive.map((participant) => `
             <div class="person-row">
-              <div><strong>${escapeHtml(participant.name)}</strong><span>${participant.isGPS ? `GPS：${escapeHtml(participant.gpsLocation)}` : labels.status[participant.status]}</span></div>
+              <div><strong>${escapeHtml(participant.name)}</strong><span>${participant.isGPS ? `GPS：${escapeHtml(gpsFreshness(participant).label)}` : labels.status[participant.status]}</span></div>
               <button class="danger catch-btn" data-hunter="${hunter.id}" data-participant="${participant.id}" data-name="${escapeHtml(participant.name)}">回報捉到</button>
             </div>
           `).join("") : `<p class="muted">暫時沒有存活參加者。</p>`}
@@ -542,7 +720,7 @@ function participantAdminRow(participant) {
     <div class="person-row ${participant.status}">
       <div>
         <strong>${escapeHtml(participant.name)}</strong>
-        <span>${labels.status[participant.status]}｜影相 ${participant.photoCompleted ? "完成" : "未"}｜一番賞 ${participant.hasPlayedIchiban ? "已記錄" : "未記錄"}｜GPS ${participant.isGPS ? "ON" : "OFF"}</span>
+        <span>${labels.status[participant.status]}｜影相 ${participant.photoCompleted ? "完成" : "未"}｜一番賞 ${participant.hasPlayedIchiban ? "已記錄" : "未記錄"}｜GPS ${participant.isGPS ? `${participant.gpsMode === "live" ? "真實" : "手動"}／${gpsFreshness(participant).label}` : "OFF"}</span>
       </div>
       <div class="mini-actions">
         <button class="danger participant-action" data-kind="dead" data-id="${participant.id}" data-name="${escapeHtml(participant.name)}">死亡</button>
@@ -569,6 +747,10 @@ function ichibanTab() {
       </select>
       <label>如結果是 +1 GPS，指定目標</label>
       <select id="ichiban-gps-target">${participantOptions(state.participants)}</select>
+      <select id="ichiban-gps-mode">
+        <option value="live">真實 GPS（參加者手機定位）</option>
+        <option value="manual">手動大概位置</option>
+      </select>
       <select id="ichiban-gps-location">${gpsLocations.map((location) => `<option>${escapeHtml(location)}</option>`).join("")}</select>
       <button class="primary big" id="ichiban-record">記錄並發布結果</button>
     </section>
@@ -580,18 +762,25 @@ function gpsTab() {
   return `
     <section class="panel hunter-panel">
       <h2>目前 GPS 目標</h2>
-      ${gpsTargets.length ? gpsTargets.map((target) => `
-        <div class="person-row">
-          <div><strong>${escapeHtml(target.name)}</strong><span>${escapeHtml(target.gpsLocation || "位置待更新")}</span></div>
-          <button class="gps-cancel" data-id="${target.id}" data-name="${escapeHtml(target.name)}">取消</button>
-        </div>
-      `).join("") : `<p class="muted">暫時沒有 GPS 目標。</p>`}
+      ${gpsTargets.length ? gpsTargets.map((target) => gpsTargetHtml(
+        target,
+        `<button class="gps-cancel danger" data-id="${target.id}" data-name="${escapeHtml(target.name)}">取消 GPS</button>`
+      )).join("") : `<p class="muted">暫時沒有 GPS 目標。</p>`}
     </section>
     <section class="panel">
-      <h2>指定／更新 GPS</h2>
+      <h2>指定 GPS</h2>
       <select id="gps-participant">${participantOptions(state.participants)}</select>
-      <select id="gps-location">${gpsLocations.map((location) => `<option>${escapeHtml(location)}</option>`).join("")}</select>
-      <button class="primary big" id="gps-update">更新 GPS 位置</button>
+      <label>定位模式</label>
+      <select id="gps-mode">
+        <option value="live">真實 GPS（建議）</option>
+        <option value="manual">手動大概位置（後備）</option>
+      </select>
+      <div id="gps-manual-fields" class="hidden">
+        <label>手動位置</label>
+        <select id="gps-location">${gpsLocations.map((location) => `<option>${escapeHtml(location)}</option>`).join("")}</select>
+      </div>
+      <p class="muted">真實 GPS 啟用後，參加者需要在自己手機按「開始 GPS 定位」並允許位置權限。</p>
+      <button class="primary big" id="gps-update">啟用／更新 GPS</button>
     </section>
   `;
 }
@@ -682,6 +871,7 @@ function bind() {
     if (pendingRender) render(true);
   });
   document.getElementById("logout")?.addEventListener("click", () => {
+    stopLiveGps("已離開參加者身份");
     localStorage.removeItem("tp-role");
     localStorage.removeItem("tp-id");
     localStorage.removeItem("tp-name");
@@ -702,7 +892,11 @@ function bind() {
 }
 
 function bindParticipant() {
-  return;
+  document.getElementById("gps-start-live")?.addEventListener("click", startLiveGps);
+  document.getElementById("gps-stop-local")?.addEventListener("click", () => {
+    stopLiveGps("你已暫停本機定位；工作人員仍顯示 GPS 已啟用");
+    render(true);
+  });
 }
 
 function bindHunter() {
@@ -819,6 +1013,7 @@ function bindIchiban() {
       participantId: participant.id,
       result: document.getElementById("ichiban-result").value,
       gpsTargetId: document.getElementById("ichiban-gps-target").value,
+      gpsMode: document.getElementById("ichiban-gps-mode").value,
       gpsLocation: document.getElementById("ichiban-gps-location").value
     });
   });
@@ -828,10 +1023,21 @@ function bindGps() {
   document.querySelectorAll(".gps-cancel").forEach((button) => {
     button.addEventListener("click", () => confirmSend(`取消 ${button.dataset.name} GPS？`, "staff:gps", { participantId: button.dataset.id, isGPS: false }));
   });
+  const modeSelect = document.getElementById("gps-mode");
+  const manualFields = document.getElementById("gps-manual-fields");
+  const updateModeFields = () => manualFields?.classList.toggle("hidden", modeSelect?.value !== "manual");
+  modeSelect?.addEventListener("change", updateModeFields);
+  updateModeFields();
   document.getElementById("gps-update")?.addEventListener("click", () => {
     const participantId = document.getElementById("gps-participant").value;
     if (!participantId) return alert("請先選擇參加者。");
-    confirmSend("確認啟用／更新 GPS？", "staff:gpsLocation", { participantId, gpsLocation: document.getElementById("gps-location").value });
+    const gpsMode = modeSelect.value;
+    const gpsLocation = document.getElementById("gps-location")?.value || "位置待更新";
+    confirmSend(
+      `確認為參加者啟用${gpsMode === "live" ? "真實 GPS" : "手動位置 GPS"}？`,
+      "staff:gps",
+      { participantId, isGPS: true, gpsMode, gpsLocation }
+    );
   });
 }
 
@@ -919,3 +1125,7 @@ setInterval(() => {
   if (role?.role === "staff") return;
   if (role || state.gameState.isStarted) render();
 }, 1000);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && gpsWatchId !== null) requestGpsWakeLock();
+});

@@ -287,6 +287,119 @@ main {
   font-weight: 1000;
 }
 
+.gps-live-panel {
+  margin-bottom: 14px;
+  border: 2px solid #ff8223;
+  border-radius: 8px;
+  padding: 18px;
+  background: linear-gradient(180deg, #4a2a0d, #211205);
+  color: #ffffff;
+}
+
+.gps-live-panel.active {
+  border-color: #54d889;
+  background: linear-gradient(180deg, #123925, #091b12);
+}
+
+.gps-live-panel strong,
+.gps-live-panel span {
+  display: block;
+}
+
+.gps-live-panel strong {
+  margin: 6px 0 8px;
+  font-size: 26px;
+}
+
+.gps-live-panel p {
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+
+.gps-kicker {
+  color: #ffd09e;
+  font-size: 15px;
+  font-weight: 1000;
+  letter-spacing: 0.05em;
+}
+
+.gps-live-panel.active .gps-kicker {
+  color: #a8f3c7;
+}
+
+.gps-instruction {
+  color: #d7d9e1;
+  font-size: 14px;
+}
+
+.gps-target-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 130, 35, 0.48);
+  border-left: 5px solid #ff8223;
+  border-radius: 8px;
+  padding: 13px;
+  background: #201507;
+}
+
+.gps-target-card.active {
+  border-color: rgba(84, 216, 137, 0.5);
+  border-left-color: #54d889;
+  background: #0d1d14;
+}
+
+.gps-target-card.stale {
+  border-color: rgba(255, 83, 109, 0.58);
+  border-left-color: #ff536d;
+  background: #251015;
+}
+
+.gps-target-card strong,
+.gps-target-card span,
+.gps-target-card small {
+  display: block;
+}
+
+.gps-target-card strong {
+  font-size: 20px;
+}
+
+.gps-target-card span {
+  margin-top: 4px;
+  color: #f4f5f8;
+  font-weight: 800;
+}
+
+.gps-target-card small {
+  margin-top: 4px;
+  color: #aeb2c0;
+  font-weight: 800;
+}
+
+.gps-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.map-link {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #2368d1;
+  color: #ffffff;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
 .death-alert {
   margin-bottom: 14px;
   border: 2px solid rgba(255, 83, 109, 0.9);
@@ -745,6 +858,10 @@ main {
   }
 
   .target-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .gps-target-card {
     grid-template-columns: 1fr auto;
   }
 }
