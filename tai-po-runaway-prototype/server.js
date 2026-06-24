@@ -6,6 +6,7 @@ import { createHash, randomUUID } from "crypto";
 
 const PORT = Number(process.env.PORT || 8787);
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "staff123";
+const HUNTER_PASSWORD = process.env.HUNTER_PASSWORD || "123456";
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -226,7 +227,11 @@ function applyAction(message, socket) {
       break;
     }
 
-    case "hunter:join": {
+    case "hunter:login": {
+      if (String(payload.password || "") !== HUNTER_PASSWORD) {
+        send(socket, { type: "hunterAuth", ok: false, message: "Hunter 密碼錯誤" });
+        return;
+      }
       const name = String(payload.name || "").trim() || `Hunter ${state.hunters.length + 1}`;
       let hunter = state.hunters.find((item) => item.name === name);
       if (!hunter) {
@@ -235,6 +240,7 @@ function applyAction(message, socket) {
       }
       if (hunter.status === "removed") hunter.status = "active";
       hunter.lastUpdated = stamp;
+      send(socket, { type: "hunterAuth", ok: true });
       send(socket, { type: "joined", role: "hunter", id: hunter.id, name: hunter.name });
       break;
     }

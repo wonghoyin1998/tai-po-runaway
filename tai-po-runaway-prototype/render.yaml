@@ -8,3 +8,5 @@ services:
     envVars:
       - key: STAFF_PASSWORD
         value: staff123
+      - key: HUNTER_PASSWORD
+        value: "123456"
