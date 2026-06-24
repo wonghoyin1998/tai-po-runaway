@@ -114,6 +114,35 @@ function hunterById(hunterId) {
   return state.hunters.find((hunter) => hunter.id === hunterId);
 }
 
+function clearGps(participant) {
+  participant.isGPS = false;
+  participant.gpsMode = "manual";
+  participant.gpsLocation = "";
+  participant.gpsLatitude = null;
+  participant.gpsLongitude = null;
+  participant.gpsAccuracy = null;
+  participant.gpsUpdatedAt = null;
+  participant.gpsTrackingStatus = "inactive";
+}
+
+function enableGps(participant, mode = "live", location = "位置待更新") {
+  participant.isGPS = true;
+  participant.gpsMode = mode === "manual" ? "manual" : "live";
+  participant.gpsLocation = String(location || "位置待更新").slice(0, 80);
+  participant.gpsTrackingStatus = participant.gpsMode === "live" ? "waiting" : "manual";
+  if (participant.gpsMode === "live") {
+    participant.gpsLatitude = null;
+    participant.gpsLongitude = null;
+    participant.gpsAccuracy = null;
+    participant.gpsUpdatedAt = null;
+  }
+}
+
+function blurCoordinate(value) {
+  const grid = 0.0004;
+  return Math.round(value / grid) * grid;
+}
+
 function addHunter(name) {
   const stamp = nowIso();
   const hunter = {
@@ -177,7 +206,13 @@ function applyAction(message, socket) {
           hasPlayedIchiban: false,
           photoCompleted: false,
           isGPS: false,
+          gpsMode: "manual",
           gpsLocation: "",
+          gpsLatitude: null,
+          gpsLongitude: null,
+          gpsAccuracy: null,
+          gpsUpdatedAt: null,
+          gpsTrackingStatus: "inactive",
           reviveCount: 0,
           caughtBy: "",
           reviveRequested: false,
@@ -262,6 +297,7 @@ function applyAction(message, socket) {
       if (participant.status !== "dead") {
         participant.status = "dead";
         participant.caughtBy = "self_reported";
+        clearGps(participant);
         participant.lastUpdated = stamp;
         logEvent("participant_dead", `${participant.name} 回報被捉，狀態轉為死亡`, { participantId: participant.id });
       }
@@ -284,6 +320,7 @@ function applyAction(message, socket) {
       if (participant.status === "dead") throw new Error(`${participant.name} 已經死亡`);
       participant.status = "dead";
       participant.caughtBy = hunter.name;
+      clearGps(participant);
       participant.lastUpdated = stamp;
       hunter.caughtCount += 1;
       hunter.lastUpdated = stamp;
@@ -320,6 +357,7 @@ function applyAction(message, socket) {
         if (participant && participant.status !== "dead") {
           participant.status = "dead";
           participant.caughtBy = report.hunterName;
+          clearGps(participant);
           participant.lastUpdated = stamp;
         }
         if (hunter) {
@@ -371,6 +409,7 @@ function applyAction(message, socket) {
         };
       } else if (payload.status === "dead") {
         participant.status = "dead";
+        clearGps(participant);
       }
       participant.lastUpdated = stamp;
       logEvent("participant_status", `${participant.name} 狀態改為 ${participant.status}`, { participantId: participant.id });
@@ -402,6 +441,7 @@ function applyAction(message, socket) {
         if (!participant.photoCompleted && participant.status !== "dead") {
           participant.status = "dead";
           participant.caughtBy = "photo_failed";
+          clearGps(participant);
           participant.lastUpdated = stamp;
           count += 1;
         }
@@ -413,20 +453,47 @@ function applyAction(message, socket) {
     case "staff:gps": {
       const participant = participantById(payload.participantId);
       if (!participant) throw new Error("找不到參加者");
-      participant.isGPS = Boolean(payload.isGPS);
-      participant.gpsLocation = participant.isGPS ? String(payload.gpsLocation || participant.gpsLocation || "位置待更新") : "";
+      if (Boolean(payload.isGPS)) {
+        enableGps(participant, payload.gpsMode, payload.gpsLocation);
+      } else {
+        clearGps(participant);
+      }
       participant.lastUpdated = stamp;
-      logEvent(participant.isGPS ? "gps_enabled" : "gps_disabled", `${participant.name} ${participant.isGPS ? `GPS 啟用：${participant.gpsLocation}` : "GPS 取消"}`, { participantId: participant.id });
+      logEvent(
+        participant.isGPS ? "gps_enabled" : "gps_disabled",
+        `${participant.name} ${participant.isGPS ? `GPS 啟用（${participant.gpsMode === "live" ? "真實定位" : `手動：${participant.gpsLocation}`}）` : "GPS 取消"}`,
+        { participantId: participant.id }
+      );
       break;
     }
 
     case "staff:gpsLocation": {
       const participant = participantById(payload.participantId);
       if (!participant) throw new Error("找不到參加者");
-      participant.gpsLocation = String(payload.gpsLocation || "位置待更新");
-      participant.isGPS = true;
+      enableGps(participant, "manual", payload.gpsLocation);
       participant.lastUpdated = stamp;
       logEvent("gps_location", `${participant.name} GPS 位置更新：${participant.gpsLocation}`, { participantId: participant.id });
+      break;
+    }
+
+    case "participant:gpsUpdate": {
+      const participant = participantById(payload.participantId);
+      if (!participant) throw new Error("找不到參加者");
+      if (!participant.isGPS || participant.gpsMode !== "live" || participant.status === "dead") return;
+      const latitude = Number(payload.latitude);
+      const longitude = Number(payload.longitude);
+      const accuracy = Number(payload.accuracy);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) throw new Error("GPS 座標無效");
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) throw new Error("GPS 座標超出範圍");
+      const previousUpdate = participant.gpsUpdatedAt ? Date.parse(participant.gpsUpdatedAt) : 0;
+      if (previousUpdate && Date.now() - previousUpdate < 7000) return;
+      participant.gpsLatitude = blurCoordinate(latitude);
+      participant.gpsLongitude = blurCoordinate(longitude);
+      participant.gpsAccuracy = Math.max(45, Math.min(1000, Number.isFinite(accuracy) ? Math.round(accuracy) : 45));
+      participant.gpsUpdatedAt = stamp;
+      participant.gpsTrackingStatus = "active";
+      participant.gpsLocation = "真實 GPS 約略位置";
+      participant.lastUpdated = stamp;
       break;
     }
 
@@ -471,10 +538,9 @@ function applyAction(message, socket) {
       }
       if (result === "gps") {
         const target = participantById(payload.gpsTargetId) || participant;
-        target.isGPS = true;
-        target.gpsLocation = payload.gpsLocation || "位置待更新";
+        enableGps(target, payload.gpsMode || "live", payload.gpsLocation);
         target.lastUpdated = stamp;
-        detail = `+1 GPS：${target.name}`;
+        detail = `+1 GPS：${target.name}（${target.gpsMode === "live" ? "真實定位" : "手動位置"}）`;
       }
       participant.hasPlayedIchiban = true;
       participant.lastUpdated = stamp;
