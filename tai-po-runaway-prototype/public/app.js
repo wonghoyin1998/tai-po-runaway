@@ -5,6 +5,17 @@ const labels = {
   hunter: { active: "出場中", paused: "暫停追捕", removed: "已移除" }
 };
 const gpsLocations = ["近入口", "近公園", "近影相點", "近海濱長廊", "前往圓洲仔公園方向", "位置待更新"];
+const messagePresets = [
+  ["opening", "開局／遊戲開始", "遊戲正式開始", "遊戲正式開始！請留在指定範圍內，避開 Hunter，並留意最新通知。", "mission"],
+  ["chip", "尋找籌碼任務", "尋找籌碼任務", "新任務現已開放。你可自行選擇是否尋找籌碼；籌碼可能有特別用途。請留意工作人員公布的範圍及截止時間。", "mission"],
+  ["kite", "睇風箏任務", "睇風箏任務", "請按提示前往指定位置完成睇風箏任務。任務於第 50 分鐘截止；未能完成可能會增加 Hunter。", "mission"],
+  ["ichiban", "一番賞開放", "一番賞商店開放", "一番賞商店現已開放至第 61 分鐘。每位參加者限玩一次，須交 1 個實體籌碼。", "mission"],
+  ["photo", "二人影相任務", "二人影相任務", "請兩人一組前往指定位置，由工作人員拍照作紀錄。任務於第 87 分鐘截止，未完成者將被判定死亡。", "mission"],
+  ["revive", "復活遊戲開放", "復活遊戲開放", "死亡參加者可前往復活區，按工作人員指示挑戰拍三七或 Flip 洗頭水樽。", "mission"],
+  ["move", "前往圓洲仔公園", "前往圓洲仔公園", "請於第 110 分鐘前安全前往圓洲仔公園指定範圍。過馬路、樓梯及濕滑位置禁止追捕。", "danger"],
+  ["final", "最後階段", "最後階段開始", "最後階段開始！請留在圓洲仔公園指定範圍，並留意最後集合指示。", "danger"],
+  ["stop", "停止追捕／集合", "停止追捕", "所有 Hunter 立即停止追捕。所有參加者及 Hunter 請前往指定集合點。", "danger"]
+].map(([id, label, title, body, level]) => ({ id, label, title, body, level }));
 
 let socket;
 let state;
@@ -15,6 +26,7 @@ let roleMode = "participant";
 let staffTab = "dashboard";
 let entryName = "";
 let entryPassword = "";
+let entryHunterPassword = "";
 let stateReceivedAtMs = Date.now();
 let publishTitle = "";
 let publishBody = "";
@@ -37,7 +49,7 @@ function isStaffFormActive() {
 }
 
 function isRoleEntryActive() {
-  return !role && ["entry-name", "entry-password"].includes(document.activeElement?.id);
+  return !role && ["entry-name", "entry-password", "entry-hunter-password"].includes(document.activeElement?.id);
 }
 
 function isStaffInteracting() {
@@ -324,6 +336,9 @@ function connect() {
         role = { role: "staff", id: "staff", name: "工作人員" };
       }
     }
+    if (message.type === "hunterAuth") {
+      toast = message.ok ? "Hunter 登入成功" : message.message || "Hunter 密碼錯誤";
+    }
     if (!role && message.type === "state" && hadState) {
       pendingRender = true;
       return;
@@ -512,8 +527,15 @@ function rolePage() {
       <section class="role-grid">${cards}</section>
       <section class="panel">
         ${roleMode === "staff"
-          ? `<label>工作人員密碼</label><input id="entry-password" type="password" placeholder="預設 staff123" value="${escapeHtml(entryPassword)}" autocomplete="current-password" />`
-          : `<label>${roleMode === "participant" ? "參加者姓名" : "Hunter 名稱／編號"}</label><input id="entry-name" placeholder="${roleMode === "participant" ? "例如：Samuel" : "例如：Hunter A"}" value="${escapeHtml(entryName)}" />`
+          ? `<label>工作人員密碼</label><input id="entry-password" type="password" placeholder="請輸入密碼" value="${escapeHtml(entryPassword)}" autocomplete="current-password" />`
+          : `
+            <label>${roleMode === "participant" ? "參加者姓名" : "Hunter 名稱／編號"}</label>
+            <input id="entry-name" placeholder="${roleMode === "participant" ? "例如：Samuel" : "例如：Hunter A"}" value="${escapeHtml(entryName)}" />
+            ${roleMode === "hunter" ? `
+              <label class="entry-extra-label">Hunter 密碼</label>
+              <input id="entry-hunter-password" type="password" placeholder="請輸入 Hunter 密碼" value="${escapeHtml(entryHunterPassword)}" autocomplete="current-password" />
+            ` : ""}
+          `
         }
         <button id="enter-role" class="primary big">進入系統</button>
       </section>
@@ -641,6 +663,16 @@ function dashboardTab() {
     ${publicMessageHtml(true)}
     <section class="panel">
       <h2>發布訊息給所有參加者</h2>
+      <div class="preset-publisher">
+        <label>快速任務訊息</label>
+        <div class="preset-row">
+          <select id="message-preset">
+            ${messagePresets.map((preset) => `<option value="${preset.id}">${escapeHtml(preset.label)}</option>`).join("")}
+          </select>
+          <button id="load-message-preset">載入範本</button>
+        </div>
+        <p class="muted">載入後可修改標題及內容，再按「立即發布」。</p>
+      </div>
       <input id="publish-title" placeholder="標題，例如：前往圓洲仔公園" value="${escapeHtml(publishTitle)}" />
       <textarea id="publish-body" placeholder="內容，例如：請所有參加者於 95-110 分鐘內前往圓洲仔公園。">${escapeHtml(publishBody)}</textarea>
       <select id="publish-level">
@@ -856,7 +888,13 @@ function bind() {
     entryName = document.getElementById("entry-name").value;
     const name = entryName.trim();
     if (!name) return;
-    send(roleMode === "participant" ? "participant:join" : "hunter:join", { name });
+    if (roleMode === "hunter") {
+      entryHunterPassword = document.getElementById("entry-hunter-password").value;
+      if (!entryHunterPassword) return alert("請輸入 Hunter 密碼。");
+      send("hunter:login", { name, password: entryHunterPassword });
+      return;
+    }
+    send("participant:join", { name });
   });
   document.getElementById("entry-name")?.addEventListener("input", (event) => {
     entryName = event.target.value;
@@ -864,10 +902,16 @@ function bind() {
   document.getElementById("entry-password")?.addEventListener("input", (event) => {
     entryPassword = event.target.value;
   });
+  document.getElementById("entry-hunter-password")?.addEventListener("input", (event) => {
+    entryHunterPassword = event.target.value;
+  });
   document.getElementById("entry-name")?.addEventListener("blur", () => {
     if (pendingRender) render(true);
   });
   document.getElementById("entry-password")?.addEventListener("blur", () => {
+    if (pendingRender) render(true);
+  });
+  document.getElementById("entry-hunter-password")?.addEventListener("blur", () => {
     if (pendingRender) render(true);
   });
   document.getElementById("logout")?.addEventListener("click", () => {
@@ -951,6 +995,18 @@ function bindStaff() {
     publishLevel = "info";
     staffBusyUntilMs = 0;
     renderAfterStaffInteraction();
+  });
+  document.getElementById("load-message-preset")?.addEventListener("click", () => {
+    const presetId = document.getElementById("message-preset").value;
+    const preset = messagePresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    publishTitle = preset.title;
+    publishBody = preset.body;
+    publishLevel = preset.level;
+    document.getElementById("publish-title").value = publishTitle;
+    document.getElementById("publish-body").value = publishBody;
+    document.getElementById("publish-level").value = publishLevel;
+    markStaffBusy(8000);
   });
   document.getElementById("publish-title")?.addEventListener("input", (event) => {
     publishTitle = event.target.value;

@@ -72,6 +72,10 @@ label {
   font-weight: 800;
 }
 
+.entry-extra-label {
+  margin-top: 14px;
+}
+
 h1,
 h2,
 h3,
@@ -687,6 +691,25 @@ main {
   margin-bottom: 14px;
 }
 
+.preset-publisher {
+  margin-bottom: 12px;
+  border: 1px solid rgba(245, 200, 75, 0.28);
+  border-radius: 8px;
+  padding: 12px;
+  background: #19170f;
+}
+
+.preset-publisher p {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.preset-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
 .primary {
   background: #f5c84b;
   color: #171717;
@@ -862,6 +885,10 @@ main {
   }
 
   .gps-target-card {
+    grid-template-columns: 1fr auto;
+  }
+
+  .preset-row {
     grid-template-columns: 1fr auto;
   }
 }
