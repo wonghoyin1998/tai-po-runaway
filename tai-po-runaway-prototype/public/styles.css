@@ -291,6 +291,77 @@ main {
   font-weight: 1000;
 }
 
+.kite-answer-panel {
+  border-color: rgba(245, 200, 75, 0.52);
+  background: #24200f;
+}
+
+.kite-answer-panel h2 {
+  margin-bottom: 6px;
+}
+
+.kite-answer-panel p {
+  margin-bottom: 8px;
+  color: #d8dbe6;
+  font-weight: 700;
+}
+
+.kite-answer-panel.submitted {
+  border-color: rgba(84, 216, 137, 0.5);
+  background: #0d1d14;
+}
+
+.kite-answer-panel.submitted strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #7ce7a8;
+  font-size: 24px;
+}
+
+.kite-staff-panel {
+  border-color: rgba(245, 200, 75, 0.38);
+}
+
+.kite-submission {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 5px solid #f5c84b;
+  border-radius: 8px;
+  padding: 12px;
+  background: #0f1018;
+}
+
+.kite-submission.correct {
+  border-left-color: #54d889;
+}
+
+.kite-submission.incorrect {
+  border-left-color: #ff536d;
+}
+
+.kite-submission p {
+  margin: 5px 0;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 800;
+  white-space: pre-wrap;
+}
+
+.kite-submission small {
+  color: #aeb2c0;
+  font-weight: 700;
+}
+
+.kite-review-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.kite-review-actions .kite-clear {
+  grid-column: 1 / -1;
+}
+
 .gps-live-panel {
   margin-bottom: 14px;
   border: 2px solid #ff8223;
@@ -890,5 +961,9 @@ main {
 
   .preset-row {
     grid-template-columns: 1fr auto;
+  }
+
+  .kite-submission {
+    grid-template-columns: 1fr minmax(250px, auto);
   }
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "tai-po-runaway-shell-v4-login-message";
+const CACHE_NAME = "tai-po-runaway-shell-v5-kite-answer";
 const APP_SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

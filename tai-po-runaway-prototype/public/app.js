@@ -31,6 +31,7 @@ let stateReceivedAtMs = Date.now();
 let publishTitle = "";
 let publishBody = "";
 let publishLevel = "info";
+let kiteAnswerDraft = "";
 let staffBusyUntilMs = 0;
 let pendingRender = false;
 let soundEnabled = false;
@@ -50,6 +51,10 @@ function isStaffFormActive() {
 
 function isRoleEntryActive() {
   return !role && ["entry-name", "entry-password", "entry-hunter-password"].includes(document.activeElement?.id);
+}
+
+function isKiteAnswerActive() {
+  return role?.role === "participant" && document.activeElement?.id === "kite-answer";
 }
 
 function isStaffInteracting() {
@@ -277,6 +282,18 @@ function connect() {
   socket.onopen = () => {
     connected = true;
     toast = "";
+    if (role?.role === "staff") {
+      const sessionToken = localStorage.getItem("tp-staff-session");
+      if (sessionToken) {
+        socket.send(JSON.stringify({ action: "auth:staffSession", payload: { sessionToken } }));
+      } else {
+        localStorage.removeItem("tp-role");
+        localStorage.removeItem("tp-id");
+        localStorage.removeItem("tp-name");
+        role = null;
+        toast = "請重新輸入工作人員密碼";
+      }
+    }
     if (gpsWatchId !== null && gpsLastPosition) {
       gpsLastSentAt = 0;
       const participant = activeParticipant();
@@ -305,6 +322,8 @@ function connect() {
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
     const hadState = Boolean(state);
+    const previousKiteCount = state?.kiteSubmissions?.length || 0;
+    const previousKiteSignature = JSON.stringify(state?.kiteSubmissions || []);
     if (message.type === "state") {
       const previousParticipant = activeParticipant();
       state = message.state;
@@ -330,14 +349,26 @@ function connect() {
     if (message.type === "auth") {
       toast = message.ok ? "工作人員登入成功" : "密碼錯誤";
       if (message.ok) {
+        if (message.sessionToken) localStorage.setItem("tp-staff-session", message.sessionToken);
         localStorage.setItem("tp-role", "staff");
         localStorage.setItem("tp-id", "staff");
         localStorage.setItem("tp-name", "工作人員");
         role = { role: "staff", id: "staff", name: "工作人員" };
+      } else if (message.sessionExpired) {
+        localStorage.removeItem("tp-staff-session");
+        localStorage.removeItem("tp-role");
+        localStorage.removeItem("tp-id");
+        localStorage.removeItem("tp-name");
+        role = null;
+        toast = "工作人員登入已失效，請重新輸入密碼";
       }
     }
     if (message.type === "hunterAuth") {
       toast = message.ok ? "Hunter 登入成功" : message.message || "Hunter 密碼錯誤";
+    }
+    if (message.type === "kiteSubmissionAccepted") {
+      kiteAnswerDraft = "";
+      toast = "風箏任務答案已提交，只會由工作人員收到";
     }
     if (!role && message.type === "state" && hadState) {
       pendingRender = true;
@@ -347,7 +378,20 @@ function connect() {
       pendingRender = true;
       return;
     }
+    if (isKiteAnswerActive()) {
+      pendingRender = true;
+      return;
+    }
     if (role?.role === "staff" && message.type === "state" && hadState) {
+      const currentKiteSignature = JSON.stringify(state?.kiteSubmissions || []);
+      if (currentKiteSignature !== previousKiteSignature && !isStaffInteracting()) {
+        if ((state?.kiteSubmissions?.length || 0) > previousKiteCount) {
+          toast = "收到新的風箏任務答案";
+          playNotificationSound();
+        }
+        render(true);
+        return;
+      }
       pendingRender = true;
       if (staffTab === "gps" && !isStaffInteracting()) render(true);
       return;
@@ -491,6 +535,10 @@ function render(force = false) {
     pendingRender = true;
     return;
   }
+  if (!force && isKiteAnswerActive()) {
+    pendingRender = true;
+    return;
+  }
   if (!force && isStaffInteracting()) {
     pendingRender = true;
     return;
@@ -582,9 +630,33 @@ function participantPage() {
         <p data-participant-minute>目前第 ${currentMinuteText()} 分鐘${state.gameState.isPaused ? "｜活動暫停" : ""}</p>
       </section>
       ${publicMessageHtml()}
+      ${participantKiteAnswerPanel(participant)}
       ${remainingPlayersHtml()}
       ${participant.isGPS ? participantGpsPanel(participant) : ""}
     </main>
+  `;
+}
+
+function participantKiteAnswerPanel(participant) {
+  const kiteMission = state.missions.find((mission) => mission.id === "kite");
+  if (!kiteMission?.isActive) return "";
+  if (participant.kiteSubmitted) {
+    return `
+      <section class="panel kite-answer-panel submitted">
+        <span class="label">睇風箏任務</span>
+        <strong>答案已提交</strong>
+        <p>答案只會傳送給工作人員。請繼續留意活動通知。</p>
+      </section>
+    `;
+  }
+  return `
+    <section class="panel kite-answer-panel">
+      <span class="label">睇風箏任務</span>
+      <h2>回報答案</h2>
+      <p>請輸入你觀察到的答案。內容只會由工作人員收到。</p>
+      <textarea id="kite-answer" maxlength="200" placeholder="輸入答案">${escapeHtml(kiteAnswerDraft)}</textarea>
+      <button class="primary big" id="kite-submit">提交答案</button>
+    </section>
   `;
 }
 
@@ -661,6 +733,7 @@ function dashboardTab() {
   return `
     ${timePanel()}
     ${publicMessageHtml(true)}
+    ${kiteSubmissionsPanel()}
     <section class="panel">
       <h2>發布訊息給所有參加者</h2>
       <div class="preset-publisher">
@@ -743,6 +816,33 @@ function dashboardTab() {
           </div>
         </div>
       `).join("")}
+    </section>
+  `;
+}
+
+function kiteSubmissionsPanel() {
+  const submissions = state.kiteSubmissions || [];
+  const statusLabels = { pending: "待處理", correct: "正確", incorrect: "不正確" };
+  return `
+    <section class="panel kite-staff-panel">
+      <div class="section-heading">
+        <h2>風箏任務答案</h2>
+        <strong>${submissions.length} 份</strong>
+      </div>
+      ${submissions.length ? submissions.map((submission) => `
+        <div class="kite-submission ${submission.status}">
+          <div>
+            <strong>${escapeHtml(submission.participantName)}</strong>
+            <p>${escapeHtml(submission.answer)}</p>
+            <small>${new Date(submission.createdAt).toLocaleTimeString("zh-HK")}｜${statusLabels[submission.status] || submission.status}</small>
+          </div>
+          <div class="mini-actions kite-review-actions">
+            <button class="kite-review blue" data-id="${submission.id}" data-status="correct">正確</button>
+            <button class="kite-review danger" data-id="${submission.id}" data-status="incorrect">不正確</button>
+            <button class="kite-clear" data-id="${submission.id}" data-name="${escapeHtml(submission.participantName)}">清除／重交</button>
+          </div>
+        </div>
+      `).join("") : `<p class="muted">尚未收到參加者答案。答案只會顯示在工作人員畫面。</p>`}
     </section>
   `;
 }
@@ -916,6 +1016,7 @@ function bind() {
   });
   document.getElementById("logout")?.addEventListener("click", () => {
     stopLiveGps("已離開參加者身份");
+    localStorage.removeItem("tp-staff-session");
     localStorage.removeItem("tp-role");
     localStorage.removeItem("tp-id");
     localStorage.removeItem("tp-name");
@@ -936,6 +1037,19 @@ function bind() {
 }
 
 function bindParticipant() {
+  document.getElementById("kite-answer")?.addEventListener("input", (event) => {
+    kiteAnswerDraft = event.target.value;
+  });
+  document.getElementById("kite-answer")?.addEventListener("blur", () => {
+    if (pendingRender) render(true);
+  });
+  document.getElementById("kite-submit")?.addEventListener("click", () => {
+    const participant = activeParticipant();
+    const answer = document.getElementById("kite-answer")?.value.trim();
+    if (!participant || !answer) return alert("請輸入風箏任務答案。");
+    if (!window.confirm("確認提交答案？提交後只有工作人員可以查看。")) return;
+    send("participant:kiteSubmit", { participantId: participant.id, answer });
+  });
   document.getElementById("gps-start-live")?.addEventListener("click", startLiveGps);
   document.getElementById("gps-stop-local")?.addEventListener("click", () => {
     stopLiveGps("你已暫停本機定位；工作人員仍顯示 GPS 已啟用");
@@ -964,6 +1078,21 @@ function bindStaff() {
       staffTab = button.dataset.tab;
       render(true);
     });
+  });
+
+  document.querySelectorAll(".kite-review").forEach((button) => {
+    button.addEventListener("click", () => confirmSend(
+      `確認將答案標記為${button.dataset.status === "correct" ? "正確" : "不正確"}？`,
+      "staff:kiteReview",
+      { submissionId: button.dataset.id, status: button.dataset.status }
+    ));
+  });
+  document.querySelectorAll(".kite-clear").forEach((button) => {
+    button.addEventListener("click", () => confirmSend(
+      `清除 ${button.dataset.name} 的答案，並讓參加者重新提交？`,
+      "staff:kiteClear",
+      { submissionId: button.dataset.id }
+    ));
   });
 
   document.getElementById("game-start")?.addEventListener("click", () => confirmSend("確認開始活動？", "game:start"));
@@ -1177,6 +1306,7 @@ setInterval(() => {
   if (!state) return;
   updateVisibleTimeOnly();
   if (isRoleEntryActive()) return;
+  if (isKiteAnswerActive()) return;
   if (isStaffInteracting()) return;
   if (role?.role === "staff") return;
   if (role || state.gameState.isStarted) render();
