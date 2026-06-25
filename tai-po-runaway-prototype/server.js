@@ -8,6 +8,7 @@ const PORT = Number(process.env.PORT || 8787);
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "staff123";
 const HUNTER_PASSWORD = process.env.HUNTER_PASSWORD || "123456";
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const STAFF_SESSION_TOKEN = randomUUID();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +65,7 @@ function initialState() {
     })),
     eventLogs: [],
     catchReports: [],
+    kiteSubmissions: [],
     reviveTrials: {}
   };
 }
@@ -88,9 +90,11 @@ function hydrateDerivedState() {
   state.gameState.activeMissions = state.missions.filter((mission) => mission.isActive).map((mission) => mission.name);
 }
 
-function publicState() {
+function publicState(includeStaffData = false) {
   hydrateDerivedState();
-  return { ...state, serverNowMs: Date.now() };
+  const snapshot = { ...state, serverNowMs: Date.now() };
+  if (!includeStaffData) delete snapshot.kiteSubmissions;
+  return snapshot;
 }
 
 function logEvent(type, detail, extra = {}) {
@@ -191,7 +195,23 @@ function applyAction(message, socket) {
 
   switch (action) {
     case "auth:staff":
-      send(socket, { type: "auth", ok: payload.password === STAFF_PASSWORD, role: "staff" });
+      if (payload.password === STAFF_PASSWORD) {
+        socket._role = "staff";
+        send(socket, { type: "auth", ok: true, role: "staff", sessionToken: STAFF_SESSION_TOKEN });
+        send(socket, { type: "state", state: publicState(true) });
+      } else {
+        send(socket, { type: "auth", ok: false, role: "staff" });
+      }
+      return;
+
+    case "auth:staffSession":
+      if (payload.sessionToken === STAFF_SESSION_TOKEN) {
+        socket._role = "staff";
+        send(socket, { type: "auth", ok: true, role: "staff", resumed: true, sessionToken: STAFF_SESSION_TOKEN });
+        send(socket, { type: "state", state: publicState(true) });
+      } else {
+        send(socket, { type: "auth", ok: false, role: "staff", sessionExpired: true });
+      }
       return;
 
     case "participant:join": {
@@ -214,6 +234,8 @@ function applyAction(message, socket) {
           gpsAccuracy: null,
           gpsUpdatedAt: null,
           gpsTrackingStatus: "inactive",
+          kiteSubmitted: false,
+          kiteSubmittedAt: null,
           reviveCount: 0,
           caughtBy: "",
           reviveRequested: false,
@@ -224,6 +246,8 @@ function applyAction(message, socket) {
         logEvent("participant_joined", `${name} 加入活動`, { participantId: participant.id });
       }
       send(socket, { type: "joined", role: "participant", id: participant.id, name: participant.name });
+      socket._role = "participant";
+      socket._participantId = participant.id;
       break;
     }
 
@@ -242,6 +266,63 @@ function applyAction(message, socket) {
       hunter.lastUpdated = stamp;
       send(socket, { type: "hunterAuth", ok: true });
       send(socket, { type: "joined", role: "hunter", id: hunter.id, name: hunter.name });
+      socket._role = "hunter";
+      socket._hunterId = hunter.id;
+      break;
+    }
+
+    case "participant:kiteSubmit": {
+      hydrateDerivedState();
+      const participant = participantById(payload.participantId);
+      const kiteMission = state.missions.find((mission) => mission.id === "kite");
+      if (!participant) throw new Error("找不到參加者");
+      if (socket._participantId && socket._participantId !== participant.id) throw new Error("身份不符");
+      if (participant.status === "dead") throw new Error("死亡參加者不可提交答案");
+      if (!kiteMission?.isActive) throw new Error("風箏任務目前未開放");
+      if (participant.kiteSubmitted) throw new Error("你已提交風箏任務答案");
+      const answer = String(payload.answer || "").trim().slice(0, 200);
+      if (!answer) throw new Error("請輸入答案");
+      const submission = {
+        id: id("kite"),
+        participantId: participant.id,
+        participantName: participant.name,
+        answer,
+        status: "pending",
+        createdAt: stamp,
+        reviewedAt: null
+      };
+      state.kiteSubmissions.unshift(submission);
+      participant.kiteSubmitted = true;
+      participant.kiteSubmittedAt = stamp;
+      participant.lastUpdated = stamp;
+      logEvent("kite_answer_submitted", `${participant.name} 已提交風箏任務答案`, { participantId: participant.id });
+      send(socket, { type: "kiteSubmissionAccepted", createdAt: stamp });
+      break;
+    }
+
+    case "staff:kiteReview": {
+      if (socket._role !== "staff") throw new Error("只有工作人員可處理答案");
+      const submission = state.kiteSubmissions.find((item) => item.id === payload.submissionId);
+      if (!submission) throw new Error("找不到答案紀錄");
+      if (!["pending", "correct", "incorrect"].includes(payload.status)) throw new Error("答案狀態無效");
+      submission.status = payload.status;
+      submission.reviewedAt = stamp;
+      logEvent("kite_answer_reviewed", `${submission.participantName} 的風箏答案標記為 ${submission.status}`, { participantId: submission.participantId });
+      break;
+    }
+
+    case "staff:kiteClear": {
+      if (socket._role !== "staff") throw new Error("只有工作人員可清除答案");
+      const index = state.kiteSubmissions.findIndex((item) => item.id === payload.submissionId);
+      if (index < 0) throw new Error("找不到答案紀錄");
+      const [submission] = state.kiteSubmissions.splice(index, 1);
+      const participant = participantById(submission.participantId);
+      if (participant) {
+        participant.kiteSubmitted = false;
+        participant.kiteSubmittedAt = null;
+        participant.lastUpdated = stamp;
+      }
+      logEvent("kite_answer_cleared", `${submission.participantName} 的風箏答案已清除，可重新提交`, { participantId: submission.participantId });
       break;
     }
 
@@ -613,8 +694,9 @@ function send(socket, payload) {
 }
 
 function broadcast() {
-  const payload = { type: "state", state: publicState() };
-  for (const socket of clients) send(socket, payload);
+  for (const socket of clients) {
+    send(socket, { type: "state", state: publicState(socket._role === "staff") });
+  }
 }
 
 function handleFrame(socket, chunk) {
@@ -716,7 +798,7 @@ server.on("upgrade", (req, socket) => {
     ""
   ].join("\r\n"));
   clients.add(socket);
-  send(socket, { type: "state", state: publicState() });
+  send(socket, { type: "state", state: publicState(false) });
   socket.on("data", (chunk) => handleFrame(socket, chunk));
   socket.on("close", () => clients.delete(socket));
   socket.on("error", () => clients.delete(socket));
