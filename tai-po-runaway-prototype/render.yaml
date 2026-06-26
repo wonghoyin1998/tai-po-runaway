@@ -1,12 +1,14 @@
 services:
   - type: web
     name: tai-po-runaway
-    runtime: node
+    env: node
     plan: free
     buildCommand: npm run build
     startCommand: npm start
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: STAFF_PASSWORD
-        value: staff123
+        sync: false
       - key: HUNTER_PASSWORD
         value: "123456"

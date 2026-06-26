@@ -1,13 +1,15 @@
 {
-  "name": "tai-po-runaway-prototype",
-  "version": "1.3.0",
+  "name": "tai-po-runaway",
+  "version": "1.4.0",
   "private": true,
-  "type": "module",
+  "description": "大埔逃走中 Web App Prototype with realtime sync, PWA, GPS and mission tools.",
+  "type": "commonjs",
   "scripts": {
     "dev": "node server.js",
-    "server": "node server.js",
-    "start": "NODE_ENV=production node server.js",
-    "build": "node --check server.js && node --check public/app.js"
+    "start": "node server.js",
+    "build": "node server.js --check"
   },
-  "dependencies": {}
+  "engines": {
+    "node": ">=18"
+  }
 }
