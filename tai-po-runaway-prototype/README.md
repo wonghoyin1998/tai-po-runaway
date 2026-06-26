@@ -84,3 +84,8 @@ HUNTER_PASSWORD=123456
 - Render Free 可能因閒置而休眠；活動前請提前開啟網址測試
 - 目前資料存於 server memory，server 重啟會重置活動狀態
 - 真實 GPS 需要參加者自行允許定位，手機鎖屏或轉 App 可能停止更新
+
+
+## v1.4 no-assets 版本
+
+此版本已將 7 張尋找籌碼位置相片內嵌於 `public/app.js`，不用再上載 `public/assets` folder。上載 GitHub 時只需覆蓋根目錄檔案及 `public` 入面的檔案即可。

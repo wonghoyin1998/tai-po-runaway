@@ -1,4 +1,4 @@
-const CACHE_NAME = "tai-po-runaway-v1.4.0";
+const CACHE_NAME = "tai-po-runaway-v1.4-no-assets-20260626";
 const SHELL = [
   "/",
   "/index.html",
@@ -6,13 +6,6 @@ const SHELL = [
   "/public/app.js?v=1.4.0",
   "/public/manifest.json",
   "/public/icon.svg",
-  "/public/assets/chip-locations/chip-01-jasmine.jpg",
-  "/public/assets/chip-locations/chip-02-viewpoint-board.jpg",
-  "/public/assets/chip-locations/chip-03-lifebuoy.jpg",
-  "/public/assets/chip-locations/chip-04-white-wall.jpg",
-  "/public/assets/chip-locations/chip-05-bird-statue.jpg",
-  "/public/assets/chip-locations/chip-06-pole-46.jpg",
-  "/public/assets/chip-locations/chip-07-banyan-sign.jpg"
 ];
 
 self.addEventListener("install", (event) => {
